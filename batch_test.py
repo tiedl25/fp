@@ -61,10 +61,10 @@ if __name__ == '__main__':
             for i in range(len(tables)):
                 match = False
                 for j in range(len(test_tables)):
-                    #if np.allclose(tables[i], test_tables[j], atol=5):
-                    #    match = True
-                    #    matches += 1
-                    if abs(tables[i][1] - test_tables[j][1]) < tol and abs(tables[i][3] - test_tables[j][3]) < tol:
+                    assert_horizontal = abs(tables[i][1] - test_tables[j][1]) < tol and abs(tables[i][3] - test_tables[j][3]) < tol
+                    assert_all = np.allclose(tables[i], test_tables[j], atol=5)
+
+                    if assert_horizontal:
                         match = True
                         matches += 1
 
