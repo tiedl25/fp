@@ -10,6 +10,7 @@ class TableFinder:
         '''
             Find a maximum difference between characters y-values, that is suitable as decision maker between 'inside-table' and 'outside-table'
         '''
+        # TODO: Implement based on a average line pitch
         max_diff = float('inf')
 
         for i in range(len(lst)-1):
@@ -23,24 +24,37 @@ class TableFinder:
     def find_table_top(self, bbox, max_diff):
         chars = sorted(self.page.crop(bbox).chars, key=lambda e: e['top'])
         chars.reverse()
+        chars.insert(0, {'top': bbox[3], 'bottom': bbox[3], 'text': '_'})
 
-        for i in range(len(chars)-1):
-            while chars[i+1]['text'] == ' ':
+        i=0
+        while i < len(chars)-1:
+            # remove white spaces
+            if chars[i+1]['text'] == ' ':
                 chars.pop(i+1)
-
-            diff = chars[i]['top'] - chars[i+1]['bottom']
-            if diff > max_diff:
-                return chars[i]['top'] - 1
+            else:
+                diff = chars[i]['top'] - chars[i+1]['bottom']
+                if diff > max_diff:
+                    return chars[i]['top'] - 1   
+                i+=1
 
         return chars[len(chars)-1]['top'] - 1
 
     def find_table_bottom(self, bbox, max_diff):
         chars = sorted(self.page.crop(bbox).chars, key=lambda e: e['bottom'])
+        chars.insert(0, {'top': bbox[1], 'bottom': bbox[1], 'text': '_'})
 
-        for i in range(len(chars)-1):
-            diff = chars[i+1]['top'] - chars[i]['bottom']
-            if diff > max_diff:
-                return chars[i]['bottom'] + 1
+        i=0
+        while i < len(chars)-1:
+            # remove white spaces
+            if chars[i+1]['text'] == ' ':
+                chars.pop(i+1)
+            else:
+                diff = chars[i+1]['top'] - chars[i]['bottom']
+                if diff > max_diff:
+                    (diff)
+                    return chars[i]['bottom'] + 1
+                i+=1
+
 
         return chars[len(chars)-1]['bottom'] +1
 
@@ -126,10 +140,12 @@ class TableFinder:
         '''
         self.lines.sort(key = lambda e: e['top'])
         self.lines = self.concat_lines(self.page.lines)
+
+        #return self.lines
         for i, line in enumerate(self.lines):
-            if line['non_stroking_color'] != None and len(line['non_stroking_color']) > 2:
-                if line['stroking_color'] != line['non_stroking_color']:
-                    continue
+            #if line['non_stroking_color'] != None and len(line['non_stroking_color']) > 2:
+            #    if line['stroking_color'] != line['non_stroking_color']:
+            #        continue
             
             bottom = self.find_table_bottom([line['x0'], line['top'], line['x1'], self.page.height], 5)
             top = self.find_table_top([line['x0'], 0, line['x1'], line['bottom']], 4)
@@ -158,7 +174,7 @@ class TableFinder:
 if __name__ == '__main__':
     tables = []
 
-    with pdfplumber.open("examples/pdf/FDX/2017/page_80.pdf") as pdf:
+    with pdfplumber.open("examples/pdf/FDX/2017/page_62.pdf") as pdf:
         page = pdf.pages[0]
         t_finder = TableFinder(page)
         tables = t_finder.find_tables()
