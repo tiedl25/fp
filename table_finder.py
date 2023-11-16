@@ -51,12 +51,48 @@ class TableFinder:
             else:
                 diff = chars[i+1]['top'] - chars[i]['bottom']
                 if diff > max_diff:
-                    (diff)
                     return chars[i]['bottom'] + 1
                 i+=1
 
 
         return chars[len(chars)-1]['bottom'] +1
+    
+    def find_table_left(self, bbox, max_diff):
+        chars = sorted(self.page.crop(bbox).chars, key=lambda e: e['x1'])
+        chars.reverse()
+        chars.insert(0, {'x0': bbox[2], 'x1': bbox[2], 'text': '_'})
+
+        i=0
+        while i < len(chars)-1:
+            # remove white spaces
+            if chars[i+1]['text'] == ' ':
+                chars.pop(i+1)
+            else:
+                diff = chars[i]['x0'] - chars[i+1]['x1']
+                if diff > max_diff:
+                    return chars[i]['x0'] -1
+                i+=1
+
+
+        return chars[len(chars)-1]['x0'] -1
+    
+    def find_table_right(self, bbox, max_diff):
+        chars = sorted(self.page.crop(bbox).chars, key=lambda e: e['x0'])
+        chars.insert(0, {'x0': bbox[0], 'x1': bbox[0], 'text': '_'})
+
+        i=0
+        while i < len(chars)-1:
+            # remove white spaces
+            if chars[i+1]['text'] == ' ':
+                chars.pop(i+1)
+            else:
+                diff = chars[i+1]['x0'] - chars[i]['x1']
+                if diff > max_diff:
+                    return chars[i]['x1'] + 1
+                i+=1
+
+
+        return chars[len(chars)-1]['x1'] +1
 
     def concat_lines(self, lst):
         '''
@@ -149,8 +185,10 @@ class TableFinder:
             
             bottom = self.find_table_bottom([line['x0'], line['top'], line['x1'], self.page.height], 5)
             top = self.find_table_top([line['x0'], 0, line['x1'], line['bottom']], 4)
+            left = self.find_table_left([0, top, line['x0'], bottom], 2)
+            right = self.find_table_right([line['x1'], top, self.page.width, bottom], 2)
 
-            bbox = [line['x0'], top, line['x1'], bottom]
+            bbox = [left, top, right, bottom]
             
             self.tables.append(bbox)
 
@@ -174,7 +212,7 @@ class TableFinder:
 if __name__ == '__main__':
     tables = []
 
-    with pdfplumber.open("examples/pdf/FDX/2017/page_62.pdf") as pdf:
+    with pdfplumber.open("examples/pdf/FDX/2017/page_31.pdf") as pdf:
         page = pdf.pages[0]
         t_finder = TableFinder(page)
         tables = t_finder.find_tables()

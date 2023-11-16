@@ -8,15 +8,14 @@ To further process the lines, I wrote a method that concatenates all lines with 
 
 #### Getting the bounding box
 Each ruling line represents at first a table and is it's anker point. Starting from there I create two bounding boxes one above the line and one below. They are open to the top or bottom respectively. The left and right border are represented by two horizontal lines. The distance to the left side of the page is the start or end point of the ruling line.
-The characters in each bounding box are sorted by their distance to the top of the page. If the y-difference between two characters is greater than a specified value, we set a new top or bottom border. Both bounding boxes are combined and present the new bounding box of the table. 
+The characters in each bounding box are sorted by their distance to the top of the page. If the y-difference between two characters is greater than a specified value, we set a new top or bottom border. The same is now also done for left and right. All bounding boxes are combined and present the new bounding box of the table. 
 Now we look for overlapping tables and merge them together by adjusting the bounding box.
 
 
 #### Problems
 + Not every table in the pdfs is given in the annotated json file
 + Some tables don't consist of any line
-
-
++ The maximum differences are difficult to assign generally
 
 ### Installation
 Coming soon ...
