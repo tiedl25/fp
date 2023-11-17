@@ -121,22 +121,25 @@ class TableFinder:
         '''
         table = self.tables.pop(0)
         derived_tables = [table]
+    
+        for i, test_table in enumerate(self.tables):
+            bbox = test_table['bbox']
+            table_bbox = table['bbox']
 
-        for i, bbox in enumerate(self.tables):
             #table side | bbox side
-            ll = bbox[0] < table[0] #bbox left side is on the left of the table
-            lr = bbox[2] < table[0] #bbox right side is on the left of the table
-            rr = bbox[2] > table[2] #bbox right side is on the right of the table
-            rl = bbox[0] > table[2] #bbox left side is on the right of the table
-            tt = bbox[1] < table[1] #bbox top side is on top of the table
-            tb = bbox[3] < table[1] #bbox bottom side is on top of the table
-            bb = bbox[3] > table[3] #bbox bottom side is below the table
-            bt = bbox[1] > table[3] #bbox top side is below the table
+            ll = bbox[0] < table_bbox[0] #bbox left side is on the left of the table
+            lr = bbox[2] < table_bbox[0] #bbox right side is on the left of the table
+            rr = bbox[2] > table_bbox[2] #bbox right side is on the right of the table
+            rl = bbox[0] > table_bbox[2] #bbox left side is on the right of the table
+            tt = bbox[1] < table_bbox[1] #bbox top side is on top of the table
+            tb = bbox[3] < table_bbox[1] #bbox bottom side is on top of the table
+            bb = bbox[3] > table_bbox[3] #bbox bottom side is below the table
+            bt = bbox[1] > table_bbox[3] #bbox top side is below the table
 
-            l_inside = not (ll and rl)
-            r_inside = not (lr and rr)
-            b_inside = not (tb and bb)
-            t_inside = not (tt and bt)
+            l_inside = not (ll or rl)
+            r_inside = not (lr or rr)
+            b_inside = not (tb or bb)
+            t_inside = not (tt or bt)
 
             #     2
             # 1 _____ 3
@@ -148,25 +151,55 @@ class TableFinder:
             # --> numbers refer to intersecting tables
             
             if ll and rr and tt and bb: # table is inside bbox
-                table = bbox
+                table_bbox = bbox
+                table['lines'].insert(0, test_table['lines'][0])
             elif (ll and lr) or (rr and rl) or (tt and tb) or (bb and bt): # bbox is next to the table -> completely unrelated
-                derived_tables.append(bbox)
-            elif l_inside and rr:
-                table[2] = bbox[2] # 3 4 5
-                if b_inside and tt:
-                    table[1] = bbox[1] # 3
+                derived_tables.append(test_table)
+            elif l_inside and r_inside and t_inside and b_inside:
+                table['lines'].append(test_table['lines'][0])
+            else:
+                if l_inside and rr:
+                    table['lines'].append(test_table['lines'][0])
+                    table_bbox[2] = bbox[2] # 3 4 5
+                    if b_inside and tt:
+                        table_bbox[1] = bbox[1] # 3
+                    elif t_inside and bb:
+                        table_bbox[3] = bbox[3] # 5
+                elif r_inside and ll:
+                    table['lines'].append(test_table['lines'][0])
+                    table_bbox[0] = bbox[0] # 7 8 1
+                    if b_inside and tt:
+                        table_bbox[1] = bbox[1] # 7
+                    elif t_inside and bb:
+                        table_bbox[3] = bbox[3] # 1
+                elif b_inside and tt:
+                    table['lines'].append(test_table['lines'][0])
+                    table_bbox[1] = bbox[1] # 1 2 3 --> in reality only 2
                 elif t_inside and bb:
-                    table[3] = bbox[3] # 5
-            elif r_inside and ll:
-                table[0] = bbox[0] # 7 8 1
-                if b_inside and tt:
-                    table[1] = bbox[1] # 7
-                elif t_inside and bb:
-                    table[3] = bbox[3] # 1
-            elif b_inside and tt:
-                table[1] = bbox[1] # 1 2 3 --> in reality only 2
-            elif t_inside and bb:
-                table[3] = bbox[3] # 5 6 7 --> in reality only 6 
+                    table['lines'].append(test_table['lines'][0])
+                    table_bbox[3] = bbox[3] # 5 6 7 --> in reality only 6 
+                elif l_inside and r_inside:
+                    table['lines'].append(test_table['lines'][0])
+
+                    if tt:
+                        table_bbox[1] = bbox[1]
+                    if bb:
+                        table_bbox[3] = bbox[3]
+                elif b_inside and t_inside:
+                    table['lines'].append(test_table['lines'][0])
+
+                    if rr:
+                        table_bbox[2] = bbox[2]
+                    if ll: 
+                        table_bbox[0] = bbox[0]
+
+                if tt and bb:
+                    table_bbox[1] = bbox[1]
+                    table_bbox[3] = bbox[3]
+
+                if rr and ll:
+                    table_bbox[0] = bbox[0]
+                    table_bbox[2] = bbox[2]
 
         return derived_tables
 
@@ -176,8 +209,6 @@ class TableFinder:
         '''
         self.lines.sort(key = lambda e: e['top'])
         self.lines = self.concat_lines(self.page.lines)
-
-        #return self.lines
         for i, line in enumerate(self.lines):
             #if line['non_stroking_color'] != None and len(line['non_stroking_color']) > 2:
             #    if line['stroking_color'] != line['non_stroking_color']:
@@ -190,14 +221,15 @@ class TableFinder:
 
             bbox = [left, top, right, bottom]
             
-            self.tables.append(bbox)
+            table = {'bbox': bbox, 'lines': [line]}
+
+            self.tables.append(table)
 
         #return self.tables
         derived_tables = []
         if (len(self.tables)>0):
             while True:
                 self.tables = self.derive_tables()
-
                 derived_tables.append(self.tables.pop(0))
                 if len(self.tables) == 0:
                     break
@@ -218,5 +250,6 @@ if __name__ == '__main__':
         tables = t_finder.find_tables()
 
         im = page.to_image(resolution=300)
-        im.draw_rects(tables)
+        bboxes = [x['bbox'] for x in tables]
+        im.draw_rects(bboxes)
         im.save("test.png")

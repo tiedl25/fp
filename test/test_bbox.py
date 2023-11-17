@@ -63,8 +63,8 @@ if __name__ == '__main__':
             for i in range(len(tables)):
                 match = False
                 for j in range(len(test_tables)):
-                    assert_horizontal = abs(tables[i][1] - test_tables[j][1]) < tol and abs(tables[i][3] - test_tables[j][3]) < tol
-                    assert_all = np.allclose(tables[i], test_tables[j], atol=5)
+                    assert_horizontal = abs(tables[i]['bbox'][1] - test_tables[j][1]) < tol and abs(tables[i]['bbox'][3] - test_tables[j][3]) < tol
+                    assert_all = np.allclose(tables[i]['bbox'], test_tables[j], atol=5)
 
                     if assert_all:
                         match = True
@@ -74,7 +74,7 @@ if __name__ == '__main__':
                     print(f"\t{file} Table {i+1}")
             
             im.draw_rects(test_tables, stroke_width=0, fill=(230, 65, 67, 65))
-            im.draw_rects(tables, stroke_width=0)
+            im.draw_rects([x['bbox'] for x in tables], stroke_width=0)
             im.save(f"img/{file[0:-4]}.png")
             test_table_index+=1
         
