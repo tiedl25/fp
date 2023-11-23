@@ -19,14 +19,14 @@ class LayoutExtractor:
             else:
                 diff = char['x0'] - chars[i]['x1']
                 if diff > max_diff:
-                    separator.append(((char['x0'], self.table['bbox'][1]), (char['x0'], self.table['bbox'][3])))
+                    top, bottom = self.table['bbox'][1], self.table['bbox'][3]
+                    separator.append({'x0': char['x0'], 'top': top, 'x1': char['x0'], 'bottom': bottom, 'object_type': 'line', 'height': bottom-top})
                 #elif chars[i+1]['text'] in symbols or chars[i]['text'] in symbols:
                 #    symbol_separator.append(chars[i+1]['x0'])
                 if chars[0]['text'] in symbols or char['text'] in symbols:
-                    print(char['text'])
-                    top, bottom = self.find_unit_column(chars[i])
-                    separator.append(((char['x0'], top), (char['x0'], bottom)))
-                    separator.append(((char['x1'], top), (char['x1'], bottom)))
+                    top, bottom = self.find_unit_column(char)
+                    separator.append({'x0': char['x0'], 'top': top, 'x1': char['x0'], 'bottom': bottom, 'object_type': 'line', 'height': bottom-top})
+                    separator.append({'x0': char['x1'], 'top': top, 'x1': char['x1'], 'bottom': bottom, 'object_type': 'line', 'height': bottom-top})
                 i+=1
 
         return separator
@@ -54,7 +54,7 @@ class LayoutExtractor:
         lines.append({'top': self.table['bbox'][3], 'bottom': self.table['bbox'][3]})
 
         for i in range(len(lines)-1):
-            print(f"{char['bottom']}\t{lines[i]['top']}\t{lines[i+1]['bottom']}")
+            #print(f"{char['bottom']}\t{lines[i]['top']}\t{lines[i+1]['bottom']}")
             if char['top'] >= lines[i]['bottom'] and char['bottom'] <= lines[i+1]['top']:
                 return lines[i]['bottom'], lines[i+1]['top']
             
@@ -69,14 +69,38 @@ class LayoutExtractor:
     #        i+=2
     #        e = [x for x in header_lines: x['']
 
+    def find_cells(self):
+        vertical_lines = self.column_separator
+        vertical_lines.append(self.table['bbox'][0]) # left line
+        vertical_lines.append(self.table['bbox'][2]) # right line
+        horizontal_lines = self.row_separator
+        horizontal_lines.append(self.table['bbox'][1]) # top line
+        horizontal_lines.append(self.table['bbox'][3]) # bottom line
+
+        table_settings = {
+            "vertical_strategy": "explicit",
+            "horizontal_strategy": "explicit",
+            "snap_tolerance": 0,
+            "text_tolerance": 0,
+            "intersection_tolerance": 0,
+            "join_tolerance": 0,
+            "min_words_vertical": 0,
+            "min_words_horizontal": 0,
+            "explicit_vertical_lines": vertical_lines,
+            "explicit_horizontal_lines": horizontal_lines
+        }
+
+        t = table_clip.extract_tables(table_settings)
+
+        return table_settings
 
     def find_layout(self, x_space, y_space, symbols):
-        column_separator = self.find_columns(x_space, symbols)
-        row_separator = self.find_rows(y_space)
+        self.column_separator = self.find_columns(x_space, symbols)
+        self.row_separator = self.find_rows(y_space)
 
         #self.unit_layout(symbol_separator)
 
-        return column_separator, row_separator
+        return self.column_separator, self.row_separator
 
 
 def pdfplumber_table_extraction(table, table_clip):
@@ -107,17 +131,22 @@ def pdfplumber_table_extraction(table, table_clip):
 
 if __name__ == '__main__':
 
-    with pdfplumber.open("examples/pdf/FDX/2017/page_26.pdf") as pdf:
+    with pdfplumber.open("examples/pdf/FDX/2017/page_56.pdf") as pdf:
         page = pdf.pages[0]
         t_finder = TableFinder(page)
         tables = t_finder.find_tables()
         table_clip = page.crop(tables[0]['bbox'])
 
     le = LayoutExtractor(tables[0], table_clip)
-    column_separator, row_separator = le.find_layout(5, 2, ['$', '%']) # first value to 3 for separating dollar signs and to 0.01 for separating also percent signs
+    column_separator, row_separator = le.find_layout(2, 2, ['$', '%']) # first value to 3 for separating dollar signs and to 0.01 for separating also percent signs
     im = table_clip.to_image(resolution=300)
-    im.draw_lines(column_separator, stroke_width=2)
-    im.draw_hlines(row_separator, stroke_width=2)
+    #im.draw_lines(column_separator, stroke_width=2)
+    #im.draw_hlines(row_separator, stroke_width=2)
+
+    t = le.find_cells()
+
+    im.debug_tablefinder(t)
     im.save('table.png')
+
 
     #pdfplumber_table_extraction(tables[0], table_clip)       
