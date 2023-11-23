@@ -1,6 +1,7 @@
 import numpy as np
 import pdfplumber
 from table_finder import TableFinder
+from pdfplumber.ctm import CTM
 
 class LayoutExtractor:
     def __init__(self, table, clipping) -> None:
@@ -32,6 +33,7 @@ class LayoutExtractor:
                     top, bottom = self.find_unit_column(char)
                     separator.append({'x0': char['x0'], 'top': top, 'x1': char['x0'], 'bottom': bottom, 'object_type': 'line', 'height': bottom-top})
                     separator.append({'x0': char['x1'], 'top': top, 'x1': char['x1'], 'bottom': bottom, 'object_type': 'line', 'height': bottom-top})
+
                 i+=1
 
         return separator
@@ -50,6 +52,10 @@ class LayoutExtractor:
                     avg = (chars[i]['bottom'] + chars[i+1]['top']) / 2
                     separator.append(avg)
 
+                # separate footer
+                if chars[i+1]['size'] != chars[i]['size']:
+                    self.table['footer'] = chars[i]['bottom']
+                    
                 i+=1
 
         return separator  
@@ -59,7 +65,6 @@ class LayoutExtractor:
         lines.append({'top': self.table['bbox'][3], 'bottom': self.table['bbox'][3]})
 
         for i in range(len(lines)-1):
-            #print(f"{char['bottom']}\t{lines[i]['top']}\t{lines[i+1]['bottom']}")
             if char['top'] >= lines[i]['bottom'] and char['bottom'] <= lines[i+1]['top']:
                 return lines[i]['bottom'], lines[i+1]['top']
             
@@ -79,13 +84,13 @@ class LayoutExtractor:
         vertical_lines.append(self.table['bbox'][0]) # left line
         vertical_lines.append(self.table['bbox'][2]) # right line
         horizontal_lines = self.row_separator
-        horizontal_lines.append(self.table['bbox'][1]) # top line
-        horizontal_lines.append(self.table['bbox'][3]) # bottom line
+        horizontal_lines.append(self.table['header']) # top line
+        horizontal_lines.append(self.table['footer']) # bottom line
 
         table_settings = {
             "vertical_strategy": "explicit",
             "horizontal_strategy": "explicit",
-            "snap_tolerance": 0,
+            "snap_tolerance": 3,
             "text_tolerance": 0,
             "intersection_tolerance": 0,
             "join_tolerance": 0,

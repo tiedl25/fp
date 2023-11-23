@@ -120,7 +120,7 @@ class TableFinder:
             Look for overlapping tables and merge them together
         '''
         table = self.tables.pop(0)
-        derived_tables = [table]
+        derived_tables = []
     
         for i, test_table in enumerate(self.tables):
             bbox = test_table['bbox']
@@ -201,7 +201,8 @@ class TableFinder:
                     table_bbox[0] = bbox[0]
                     table_bbox[2] = bbox[2]
 
-        return derived_tables
+        self.tables = derived_tables
+        return table
 
     def find_tables(self):
         '''
@@ -229,16 +230,21 @@ class TableFinder:
         derived_tables = []
         if (len(self.tables)>0):
             while True:
-                self.tables = self.derive_tables()
-                derived_tables.append(self.tables.pop(0))
+                new_table = self.derive_tables()
+                new_table['footer'] = new_table['bbox'][3]
+                new_table['header'] = new_table['bbox'][1]
+                derived_tables.append(new_table)
                 if len(self.tables) == 0:
                     break
                 if len(self.tables) == 1:
-                    derived_tables.append(self.tables.pop(0))
+                    new_table = self.tables.pop(0)
+                    new_table['footer'] = new_table['bbox'][3]
+                    new_table['header'] = new_table['bbox'][1]
+                    derived_tables.append(new_table)
                     break
 
             self.tables = derived_tables
-
+        
         return derived_tables
     
 if __name__ == '__main__':
