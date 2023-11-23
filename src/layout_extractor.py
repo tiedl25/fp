@@ -7,7 +7,7 @@ class LayoutExtractor:
         self.table = table
         self.clipping = clipping
 
-    def find_columns(self, max_diff, symbols):
+    def find_columns(self, max_diff, special_symbols):
         chars = sorted(self.clipping.chars, key=lambda e: e['x0'])
         separator = []
         i=0
@@ -18,12 +18,17 @@ class LayoutExtractor:
                 chars.pop(i+1)
             else:
                 diff = char['x0'] - chars[i]['x1']
-                if diff > max_diff:
+                # set a new column separator if the horizontal distance between two characters is greater then max_diff or if the font changes
+                # some tables have header lines with another font too --> so the font change is only considered a column divider, 
+                # if the distance to the next character is greater than 1
+                if diff > max_diff or (diff > 1 and char['fontname'] != chars[i]['fontname']):
                     top, bottom = self.table['bbox'][1], self.table['bbox'][3]
                     separator.append({'x0': char['x0'], 'top': top, 'x1': char['x0'], 'bottom': bottom, 'object_type': 'line', 'height': bottom-top})
                 #elif chars[i+1]['text'] in symbols or chars[i]['text'] in symbols:
                 #    symbol_separator.append(chars[i+1]['x0'])
-                if chars[0]['text'] in symbols or char['text'] in symbols:
+
+                # consider special symbols like $ and % also as column dividers
+                if chars[0]['text'] in special_symbols or char['text'] in special_symbols:
                     top, bottom = self.find_unit_column(char)
                     separator.append({'x0': char['x0'], 'top': top, 'x1': char['x0'], 'bottom': bottom, 'object_type': 'line', 'height': bottom-top})
                     separator.append({'x0': char['x1'], 'top': top, 'x1': char['x1'], 'bottom': bottom, 'object_type': 'line', 'height': bottom-top})
@@ -131,7 +136,7 @@ def pdfplumber_table_extraction(table, table_clip):
 
 if __name__ == '__main__':
 
-    with pdfplumber.open("examples/pdf/FDX/2017/page_56.pdf") as pdf:
+    with pdfplumber.open("examples/pdf/FDX/2017/page_83.pdf") as pdf:
         page = pdf.pages[0]
         t_finder = TableFinder(page)
         tables = t_finder.find_tables()
@@ -140,6 +145,7 @@ if __name__ == '__main__':
     le = LayoutExtractor(tables[0], table_clip)
     column_separator, row_separator = le.find_layout(2, 2, ['$', '%']) # first value to 3 for separating dollar signs and to 0.01 for separating also percent signs
     im = table_clip.to_image(resolution=300)
+    im.draw_lines(tables[0]['lines'], stroke_width=3, stroke=(1,1,1) )
     #im.draw_lines(column_separator, stroke_width=2)
     #im.draw_hlines(row_separator, stroke_width=2)
 
