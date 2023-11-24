@@ -1,8 +1,7 @@
 import numpy as np
 import pdfplumber
 from table_finder import TableFinder
-from pdfplumber.ctm import CTM
-
+import copy
 class LayoutExtractor:
     def __init__(self, table, clipping) -> None:
         self.table = table
@@ -23,12 +22,8 @@ class LayoutExtractor:
                 # some tables have header lines with another font too --> so the font change is only considered a column divider, 
                 # if the distance to the next character is greater than 1
                 if diff > max_diff or (diff > 1 and char['fontname'] != chars[i]['fontname']):
-                    top, bottom = self.table['bbox'][1], self.table['bbox'][3]
+                    top, bottom = self.table['bbox'][1], self.table['footer']
                     separator.append({'x0': char['x0'], 'top': top, 'x1': char['x0'], 'bottom': bottom, 'object_type': 'line', 'height': bottom-top})
-                #elif chars[i+1]['text'] in symbols or chars[i]['text'] in symbols:
-                #    symbol_separator.append(chars[i+1]['x0'])
-
-                # consider special symbols like $ and % also as column dividers
                 if chars[0]['text'] in special_symbols or char['text'] in special_symbols:
                     top, bottom = self.find_unit_column(char)
                     separator.append({'x0': char['x0'], 'top': top, 'x1': char['x0'], 'bottom': bottom, 'object_type': 'line', 'height': bottom-top})
@@ -41,43 +36,49 @@ class LayoutExtractor:
     def find_rows(self, max_diff):
         chars = sorted(self.clipping.chars, key=lambda e: e['top'])
         separator = []
+        footnote_complete = False
+        footnote_found = False
+        footnote_separator = []
+
         i=0
         while i < len(chars)-1:
             # remove white spaces
-            if chars[i+1]['text'] == ' ':
+            if chars[i+1]['text'] in [" "]:
                 chars.pop(i+1)
             else:
                 diff = chars[i+1]['top'] - chars[i]['bottom']
                 if diff > max_diff:
                     avg = (chars[i]['bottom'] + chars[i+1]['top']) / 2
-                    separator.append(avg)
-
+                    footnote_separator.append(avg) if footnote_complete else separator.append(avg)
                 # separate footer
                 if chars[i+1]['size'] != chars[i]['size']:
-                    self.table['footer'] = chars[i]['bottom']
-                    
+                    if footnote_complete: 
+                        self.table['footer'] = self.table['bbox'][3]
+                    else: 
+                        self.table['footer'] = chars[i]['bottom']
+                        separator[len(separator):len(separator)] = footnote_separator
+                        footnote_found = True
+                    footnote_complete = not footnote_complete
+                    print(chars[i]['size'])
+                    print(chars[i+1]['size'])
+                
                 i+=1
 
-        return separator  
+        bbox = copy.copy(self.table['bbox'])
+        bbox[3] = self.table['footer']
+        self.clipping = self.clipping.crop(bbox)
+
+        return (not footnote_found or (footnote_found and footnote_complete)), separator
     
     def find_unit_column(self, char):
         lines = sorted(self.table['lines'], key=lambda e: e['top'])
-        lines.append({'top': self.table['bbox'][3], 'bottom': self.table['bbox'][3]})
+        lines.append({'top': self.table['footer'], 'bottom': self.table['footer']})
 
         for i in range(len(lines)-1):
             if char['top'] >= lines[i]['bottom'] and char['bottom'] <= lines[i+1]['top']:
                 return lines[i]['bottom'], lines[i+1]['top']
             
-        return self.table['bbox'][1], self.table['bbox'][3]
-
-    #def unit_layout(self, lines):
-    #    header_lines = sorted(self.table['lines'], key=lambda e: e['top'])
-#
-    #    i=0
-    #    while i < len(lines):
-    #        self.clipping.crop([lines[i], 0, lines[i+1], self.clipping.height])
-    #        i+=2
-    #        e = [x for x in header_lines: x['']
+        return self.table['bbox'][1], self.table['footer']
 
     def find_cells(self):
         vertical_lines = self.column_separator
@@ -105,12 +106,13 @@ class LayoutExtractor:
         return table_settings
 
     def find_layout(self, x_space, y_space, symbols):
+        footnote_complete, self.row_separator = self.find_rows(y_space)
+
+        if not footnote_complete: return footnote_complete, 0, 0
+
         self.column_separator = self.find_columns(x_space, symbols)
-        self.row_separator = self.find_rows(y_space)
 
-        #self.unit_layout(symbol_separator)
-
-        return self.column_separator, self.row_separator
+        return footnote_complete, self.column_separator, self.row_separator
 
 
 def pdfplumber_table_extraction(table, table_clip):
@@ -140,17 +142,29 @@ def pdfplumber_table_extraction(table, table_clip):
     
 
 if __name__ == '__main__':
+    path = "examples/pdf/FDX/2017/page_80.pdf"
 
-    with pdfplumber.open("examples/pdf/FDX/2017/page_83.pdf") as pdf:
+    with pdfplumber.open(path) as pdf:
         page = pdf.pages[0]
         t_finder = TableFinder(page)
         tables = t_finder.find_tables()
         table_clip = page.crop(tables[0]['bbox'])
 
     le = LayoutExtractor(tables[0], table_clip)
-    column_separator, row_separator = le.find_layout(2, 2, ['$', '%']) # first value to 3 for separating dollar signs and to 0.01 for separating also percent signs
+    footnote_complete, column_separator, row_separator = le.find_layout(2, 2, ['$', '%']) # first value to 3 for separating dollar signs and to 0.01 for separating also percent signs
+    if not footnote_complete: 
+        with pdfplumber.open(path) as pdf:
+            page = pdf.pages[0]
+            t_finder = TableFinder(page)
+            tables = t_finder.find_tables(bottom_threshold=10)
+            table_clip = page.crop(tables[0]['bbox'])
+
+        le = LayoutExtractor(tables[0], table_clip)
+        footnote_complete, column_separator, row_separator = le.find_layout(2, 2, ['$', '%']) # first value to 3 for separating dollar signs and to 0.01 for separating also percent signs
+        
     im = table_clip.to_image(resolution=300)
-    im.draw_lines(tables[0]['lines'], stroke_width=3, stroke=(1,1,1) )
+    im.draw_lines(tables[0]['lines'], stroke_width=3, stroke=(0,0,0))
+    #im.draw_hline(tables[0]['footer'], stroke_width=3, stroke=(200,0,0))
     #im.draw_lines(column_separator, stroke_width=2)
     #im.draw_hlines(row_separator, stroke_width=2)
 

@@ -204,7 +204,7 @@ class TableFinder:
         self.tables = derived_tables
         return table
 
-    def find_tables(self):
+    def find_tables(self, bottom_threshold=5, top_threshold=4, left_threshold=2, right_threshold=2):
         '''
             Find tables in a given pdf page
         '''
@@ -215,10 +215,10 @@ class TableFinder:
             #    if line['stroking_color'] != line['non_stroking_color']:
             #        continue
             
-            bottom = self.find_table_bottom([line['x0'], line['top'], line['x1'], self.page.height], 5)
-            top = self.find_table_top([line['x0'], 0, line['x1'], line['bottom']], 4)
-            left = self.find_table_left([0, top, line['x0'], bottom], 2)
-            right = self.find_table_right([line['x1'], top, self.page.width, bottom], 2)
+            bottom = self.find_table_bottom([line['x0'], line['top'], line['x1'], self.page.height], bottom_threshold)
+            top = self.find_table_top([line['x0'], 0, line['x1'], line['bottom']], top_threshold)
+            left = self.find_table_left([0, top, line['x0'], bottom], left_threshold)
+            right = self.find_table_right([line['x1'], top, self.page.width, bottom], right_threshold)
 
             bbox = [left, top, right, bottom]
             
@@ -250,7 +250,7 @@ class TableFinder:
 if __name__ == '__main__':
     tables = []
 
-    with pdfplumber.open("examples/pdf/FDX/2017/page_26.pdf") as pdf:
+    with pdfplumber.open("examples/pdf/FDX/2017/page_80.pdf") as pdf:
         page = pdf.pages[0]
         t_finder = TableFinder(page)
         tables = t_finder.find_tables()
