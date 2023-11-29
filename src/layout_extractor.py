@@ -36,39 +36,42 @@ class LayoutExtractor:
     def find_rows(self, max_diff):
         chars = sorted(self.clipping.chars, key=lambda e: e['top'])
         separator = []
-        footnote_complete = False
-        footnote_found = False
+        footnote_complete = None
         footnote_separator = []
 
         i=0
         while i < len(chars)-1:
             # remove white spaces
-            if chars[i+1]['text'] in [" "]:
+            if chars[i+1]['text'] == " ":
                 chars.pop(i+1)
             else:
                 diff = chars[i+1]['top'] - chars[i]['bottom']
                 if diff > max_diff:
                     avg = (chars[i]['bottom'] + chars[i+1]['top']) / 2
                     footnote_separator.append(avg) if footnote_complete else separator.append(avg)
+
                 # separate footer
-                if chars[i+1]['size'] != chars[i]['size']:
-                    if footnote_complete: 
+                if chars[i+1]['size'] != chars[i]['size']: # possible footnote
+                    if diff < 0: 
                         self.table['footer'] = self.table['bbox'][3]
+                        footnote_complete = False
                     else: 
                         self.table['footer'] = chars[i]['bottom']
-                        separator[len(separator):len(separator)] = footnote_separator
-                        footnote_found = True
-                    footnote_complete = not footnote_complete
-                    print(chars[i]['size'])
-                    print(chars[i+1]['size'])
+                        separator.extend(footnote_separator)
+                        footnote_complete = True
+                    #footnote_complete = not footnote_complete
                 
                 i+=1
+
+        if footnote_complete == None: 
+            separator.extend(footnote_separator)
+            footnote_complete = True
 
         bbox = copy.copy(self.table['bbox'])
         bbox[3] = self.table['footer']
         self.clipping = self.clipping.crop(bbox)
 
-        return (not footnote_found or (footnote_found and footnote_complete)), separator
+        return footnote_complete, separator
     
     def find_unit_column(self, char):
         lines = sorted(self.table['lines'], key=lambda e: e['top'])
@@ -81,12 +84,12 @@ class LayoutExtractor:
         return self.table['bbox'][1], self.table['footer']
 
     def find_cells(self):
-        vertical_lines = self.column_separator
-        vertical_lines.append(self.table['bbox'][0]) # left line
-        vertical_lines.append(self.table['bbox'][2]) # right line
-        horizontal_lines = self.row_separator
-        horizontal_lines.append(self.table['header']) # top line
-        horizontal_lines.append(self.table['footer']) # bottom line
+        vertical_lines = [self.table['bbox'][0], self.table['bbox'][2]] # left and right line
+        horizontal_lines = [self.table['header'], self.table['footer']] # top and bottom line
+        if "column_separator" in vars(self).keys():
+            vertical_lines.extend(self.column_separator)
+        if "row_separator" in vars(self).keys():
+            horizontal_lines.extend(self.row_separator)
 
         table_settings = {
             "vertical_strategy": "explicit",
@@ -142,25 +145,21 @@ def pdfplumber_table_extraction(table, table_clip):
     
 
 if __name__ == '__main__':
-    path = "examples/pdf/FDX/2017/page_80.pdf"
+    path = "examples/pdf/FDX/2017/page_83.pdf"
+    footnote_complete = False
+    threshold = 5 # max_diff for finding table bottom
 
-    with pdfplumber.open(path) as pdf:
-        page = pdf.pages[0]
-        t_finder = TableFinder(page)
-        tables = t_finder.find_tables()
-        table_clip = page.crop(tables[0]['bbox'])
-
-    le = LayoutExtractor(tables[0], table_clip)
-    footnote_complete, column_separator, row_separator = le.find_layout(2, 2, ['$', '%']) # first value to 3 for separating dollar signs and to 0.01 for separating also percent signs
-    if not footnote_complete: 
+    while not footnote_complete or threshold < 20: # increase threshold if the footnote is incomplete -> try again to find the table
         with pdfplumber.open(path) as pdf:
             page = pdf.pages[0]
             t_finder = TableFinder(page)
-            tables = t_finder.find_tables(bottom_threshold=10)
+            tables = t_finder.find_tables(bottom_threshold=threshold)
             table_clip = page.crop(tables[0]['bbox'])
 
+        threshold += 5
+
         le = LayoutExtractor(tables[0], table_clip)
-        footnote_complete, column_separator, row_separator = le.find_layout(2, 2, ['$', '%']) # first value to 3 for separating dollar signs and to 0.01 for separating also percent signs
+        footnote_complete, column_separator, row_separator = le.find_layout(5, 2, ['$', '%']) # first value to 3 for separating dollar signs and to 0.01 for separating also percent signs
         
     im = table_clip.to_image(resolution=300)
     im.draw_lines(tables[0]['lines'], stroke_width=3, stroke=(0,0,0))
@@ -171,7 +170,12 @@ if __name__ == '__main__':
     t = le.find_cells()
 
     im.debug_tablefinder(t)
+    table = table_clip.extract_table(t)
+    
     im.save('table.png')
 
+    import pandas as pd
+    df = pd.DataFrame(table[1:], columns=table[0])
+    df.to_excel("test.xlsx")
 
-    #pdfplumber_table_extraction(tables[0], table_clip)       
+    #pdfplumber_table_extraction(tables[0], table_clip)
