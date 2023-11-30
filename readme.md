@@ -28,13 +28,16 @@ The very basic decision criteria for the separators is the x-distance between to
 
 <img src="assets/font_criteria.png" width="300" />
 
+##### Special Symbols
 In this example the first and second column are not separated. We can lower the x value but that also creates more separator, that we don't want. So instead another criteria is introduced. The font name, which can be easily retrieved for each character with pdfplumber. When the font changes and the x-distance is greater than 1 we also create a new separator. The minimum x-distance is required. In some tables the first column also has a bold header (changes the font name). Without the minimum x-distance multiple separator lines would be created.
 
 <img src="assets/font_criteria_exception.png" width="300" />
 
-Another problem are footnotes. I first thought of completely removing them from the table extraction, but they are important information. So the table needs to be divided into the actual table and the bounding box for the footnotes. That is done in the method for saparting row. The first approach was to use the font size to distinguish between the table and the footnotes. But the footnote numbers appear ofcourse also directly in the table as superscripts. I even thought about the transformation matrix of the characters but that was a dead end.
+##### Footnotes
+Another problem are footnotes. I first thought of completely removing them from the table extraction, but they are important information. So the table needs to be divided into the actual table and the bounding box for the footnotes. That is done in the method for separting row. The first approach was to use the font size to distinguish between the table and the footnotes. But the footnote numbers appear ofcourse also directly in the table as superscripts. I even thought about the transformation matrix of the characters but that was a dead end.
+The approach I now use, when I find a change in size I also check if the y-distance is greater than zero. If so it is not a superscript and therefore a potential footnote. If only superscripts are found but no actual footnote. The table finding process is repeated with a greater maximum y-difference.
 
-
+<img src="assets/separate_footnote.png" width="300" />
 
 ### Problems
 + Not every table in the pdfs is given in the annotated json file

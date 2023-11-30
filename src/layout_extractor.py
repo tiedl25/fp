@@ -9,33 +9,43 @@ class LayoutExtractor:
         self.table_lines = sorted(self.table['lines'], key=lambda e: e['top'])
 
     def find_columns(self, max_diff, special_symbols):
+        '''
+            Define new column separator if the vertical distance between two characters is greater than max_diff or if the font changes.
+            The headerline has often also another font, that creates problems with multiple column dividers where they not belong. 
+            The font change is therefore only considered a column divider, if the distance to the next character is greater than 1.
+            For special characters it also creates separate columns, defined by a rectangle.
+        '''
         chars = sorted(self.clipping.chars, key=lambda e: e['x0'])
         separator = []
 
         i=0
         while i < len(chars)-1:
             char = chars[i+1]
-            # remove white spaces
+
             if char['text'] == ' ':
-                chars.pop(i+1)
+                chars.pop(i+1) # remove white spaces
             else:
                 diff = char['x0'] - chars[i]['x1']
-                # set a new column separator if the horizontal distance between two characters is greater then max_diff or if the font changes
-                # some tables have header lines with another font too --> so the font change is only considered a column divider, 
-                # if the distance to the next character is greater than 1
+
                 if diff > max_diff or (diff > 1 and char['fontname'] != chars[i]['fontname']):
                     top, bottom = self.table['bbox'][1], self.table['footer']
                     separator.append({'x0': char['x0'], 'top': top, 'x1': char['x0'], 'bottom': bottom, 'object_type': 'line', 'height': bottom-top})
 
                 # special characters can be defined such as $ or % that are treated as separate columns
                 if chars[0]['text'] in special_symbols or char['text'] in special_symbols:
-                    line = self.find_unit_column(char)
-                    separator.append(line)
+                    rect = self.find_unit_column(char)
+                    self.separate_unit_column(rect)
+                    separator.append(rect)
+
                 i+=1
 
         return separator
 
     def find_rows(self, max_diff):
+        '''
+            Define new row separator if the horizontal distance between two characters is greater than max_diff. 
+            Also detect, if a footnote exists and thus separate it from the rest of the table.
+        '''
         chars = sorted(self.clipping.chars, key=lambda e: e['top'])
         separator = []
         footnote_complete = None
@@ -43,9 +53,8 @@ class LayoutExtractor:
 
         i=0
         while i < len(chars)-1:
-            # remove white spaces
             if chars[i+1]['text'] == " ":
-                chars.pop(i+1)
+                chars.pop(i+1) # remove white spaces
             else:
                 diff = chars[i+1]['top'] - chars[i]['bottom']
                 if diff > max_diff:
@@ -56,15 +65,13 @@ class LayoutExtractor:
                     footnote_separator.append(line) if footnote_complete else separator.append(line)
 
                 # separate footer
-                if chars[i+1]['size'] != chars[i]['size']: # possible footnote
-                    if diff < 0: 
+                if chars[i+1]['size'] != chars[i]['size']:
+                    if diff < 0: # footnote index as superscript
                         self.table['footer'] = self.table['bbox'][3]
-                        footnote_complete = False
-                    else: 
+                    else: # probably actual footnote
                         self.table['footer'] = chars[i]['bottom']
                         separator.extend(footnote_separator)
-                        footnote_complete = True
-                    #footnote_complete = not footnote_complete
+                    footnote_complete = not footnote_complete
                 
                 i+=1
 
@@ -79,6 +86,9 @@ class LayoutExtractor:
         return footnote_complete, separator
     
     def find_unit_column(self, char):
+        '''
+            Unit columns get a top and bottom defined by the existing lines in the table.
+        '''
         self.table_lines.append({'top': self.table['footer'], 'bottom': self.table['footer']}) # footer divider should be the last line
 
         top, bottom = self.table['bbox'][1], self.table['footer']
@@ -90,13 +100,11 @@ class LayoutExtractor:
                 rect['height'] = rect['bottom'] - rect['top']
                 break
 
-        self.separate_unit_column(rect)
-
         return rect
 
     def separate_unit_column(self, rect):
         '''
-            Break rows in two parts if they intersect with the rectangle created from a special symbol
+            Break rows in two parts if they intersect with the rectangle created from a special symbol and thus transform the column into a single cell.
         '''
         rows = []
         for row in self.row_separator:
@@ -112,9 +120,8 @@ class LayoutExtractor:
             else:
                 rows.append(row)
 
+        rows.append(rect) # to get the bottom and top separator
         self.row_separator = rows   
-
-        self.row_separator.append(rect) # to get the bottom and top separator
 
     def find_cells(self):
         vertical_lines = [self.table['bbox'][0], self.table['bbox'][2]] # left and right line
@@ -144,7 +151,7 @@ class LayoutExtractor:
     def find_layout(self, x_space, y_space, symbols):
         footnote_complete, self.row_separator = self.find_rows(y_space)
 
-        if not footnote_complete: return footnote_complete, 0, 0
+        if not footnote_complete: return footnote_complete, None, None
 
         self.column_separator = self.find_columns(x_space, symbols)
 
@@ -172,13 +179,10 @@ def pdfplumber_table_extraction(table, table_clip):
         
     im = table_clip.to_image(resolution=300)
     im.debug_tablefinder(table_settings)
-    #im.draw_lines(tables[0]['lines'])
     im.save('table.png')
 
-    
-
 if __name__ == '__main__':
-    path = "examples/pdf/FDX/2017/page_26.pdf"
+    path = "examples/pdf/FDX/2017/page_83.pdf"
     footnote_complete = False
     threshold = 5 # max_diff for finding table bottom
 
@@ -192,13 +196,10 @@ if __name__ == '__main__':
         threshold += 5
 
         le = LayoutExtractor(tables[0], table_clip)
-        footnote_complete, column_separator, row_separator = le.find_layout(5, 2, ['$', '%']) # first value to 3 for separating dollar signs and to 0.01 for separating also percent signs
+        footnote_complete, column_separator, row_separator = le.find_layout(5, 2, ['$', '%'])
         
     im = table_clip.to_image(resolution=300)
     im.draw_lines(tables[0]['lines'], stroke_width=3, stroke=(0,0,0))
-    #im.draw_hline(tables[0]['footer'], stroke_width=3, stroke=(200,0,0))
-    #im.draw_lines(column_separator, stroke_width=2)
-    #im.draw_hlines(row_separator, stroke_width=2)
 
     t = le.find_cells()
 
