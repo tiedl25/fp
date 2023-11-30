@@ -6,10 +6,12 @@ class LayoutExtractor:
     def __init__(self, table, clipping) -> None:
         self.table = table
         self.clipping = clipping
+        self.table_lines = sorted(self.table['lines'], key=lambda e: e['top'])
 
     def find_columns(self, max_diff, special_symbols):
         chars = sorted(self.clipping.chars, key=lambda e: e['x0'])
         separator = []
+
         i=0
         while i < len(chars)-1:
             char = chars[i+1]
@@ -24,11 +26,11 @@ class LayoutExtractor:
                 if diff > max_diff or (diff > 1 and char['fontname'] != chars[i]['fontname']):
                     top, bottom = self.table['bbox'][1], self.table['footer']
                     separator.append({'x0': char['x0'], 'top': top, 'x1': char['x0'], 'bottom': bottom, 'object_type': 'line', 'height': bottom-top})
-                if chars[0]['text'] in special_symbols or char['text'] in special_symbols:
-                    top, bottom = self.find_unit_column(char)
-                    separator.append({'x0': char['x0'], 'top': top, 'x1': char['x0'], 'bottom': bottom, 'object_type': 'line', 'height': bottom-top})
-                    separator.append({'x0': char['x1'], 'top': top, 'x1': char['x1'], 'bottom': bottom, 'object_type': 'line', 'height': bottom-top})
 
+                # special characters can be defined such as $ or % that are treated as separate columns
+                if chars[0]['text'] in special_symbols or char['text'] in special_symbols:
+                    line = self.find_unit_column(char)
+                    separator.append(line)
                 i+=1
 
         return separator
@@ -48,7 +50,10 @@ class LayoutExtractor:
                 diff = chars[i+1]['top'] - chars[i]['bottom']
                 if diff > max_diff:
                     avg = (chars[i]['bottom'] + chars[i+1]['top']) / 2
-                    footnote_separator.append(avg) if footnote_complete else separator.append(avg)
+                    left = self.table['bbox'][0]
+                    right = self.table['bbox'][2]
+                    line = {'x0': left, 'top': avg, 'x1': right, 'bottom': avg, 'object_type': 'line', 'width': right-left}
+                    footnote_separator.append(line) if footnote_complete else separator.append(line)
 
                 # separate footer
                 if chars[i+1]['size'] != chars[i]['size']: # possible footnote
@@ -74,14 +79,42 @@ class LayoutExtractor:
         return footnote_complete, separator
     
     def find_unit_column(self, char):
-        lines = sorted(self.table['lines'], key=lambda e: e['top'])
-        lines.append({'top': self.table['footer'], 'bottom': self.table['footer']})
+        self.table_lines.append({'top': self.table['footer'], 'bottom': self.table['footer']}) # footer divider should be the last line
 
-        for i in range(len(lines)-1):
-            if char['top'] >= lines[i]['bottom'] and char['bottom'] <= lines[i+1]['top']:
-                return lines[i]['bottom'], lines[i+1]['top']
-            
-        return self.table['bbox'][1], self.table['footer']
+        top, bottom = self.table['bbox'][1], self.table['footer']
+        rect = {'x0': char['x0'], 'top': top, 'x1': char['x1'], 'bottom': bottom, 'y0': bottom, 'y1': top, 'doctop': bottom, 'object_type': 'rect', 'height': bottom-top, 'width': char['x1'] - char['x0'], 'symbol': char['text']}
+        for i in range(len(self.table_lines)-1):
+            if char['top'] >= self.table_lines[i]['bottom'] and char['bottom'] <= self.table_lines[i+1]['top']:
+                rect['top'] = rect['y1'] = self.table_lines[i]['bottom']
+                rect['bottom'] = rect['y0'] = rect['doctop'] = self.table_lines[i+1]['top']
+                rect['height'] = rect['bottom'] - rect['top']
+                break
+
+        self.separate_unit_column(rect)
+
+        return rect
+
+    def separate_unit_column(self, rect):
+        '''
+            Break rows in two parts if they intersect with the rectangle created from a special symbol
+        '''
+        rows = []
+        for row in self.row_separator:
+            if rect['top'] < row['top'] and rect['bottom'] > row['bottom'] and rect['x0'] > row['x0'] and rect['x1'] < row['x1']:
+                row_right = dict(row)
+                row_right['x0'] = rect['x1']
+                row_right['width'] = row_right['x1'] - row_right['x0']
+
+                row['x1'] = rect['x0']
+                row['width'] = row['x1'] - row['x0']
+
+                rows.extend([row, row_right])
+            else:
+                rows.append(row)
+
+        self.row_separator = rows   
+
+        self.row_separator.append(rect) # to get the bottom and top separator
 
     def find_cells(self):
         vertical_lines = [self.table['bbox'][0], self.table['bbox'][2]] # left and right line
@@ -96,7 +129,7 @@ class LayoutExtractor:
             "horizontal_strategy": "explicit",
             "snap_tolerance": 3,
             "text_tolerance": 0,
-            "intersection_tolerance": 0,
+            "intersection_y_tolerance": 5,
             "join_tolerance": 0,
             "min_words_vertical": 0,
             "min_words_horizontal": 0,
@@ -145,7 +178,7 @@ def pdfplumber_table_extraction(table, table_clip):
     
 
 if __name__ == '__main__':
-    path = "examples/pdf/FDX/2017/page_83.pdf"
+    path = "examples/pdf/FDX/2017/page_26.pdf"
     footnote_complete = False
     threshold = 5 # max_diff for finding table bottom
 
@@ -176,6 +209,7 @@ if __name__ == '__main__':
 
     import pandas as pd
     df = pd.DataFrame(table[1:], columns=table[0])
-    df.to_excel("test.xlsx")
+    df.to_excel("test.xlsx", index=False)
+    print(df)
 
     #pdfplumber_table_extraction(tables[0], table_clip)
