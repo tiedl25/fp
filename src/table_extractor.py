@@ -69,6 +69,10 @@ class TableExtractor:
             return None
         
         table_settings = le.find_cells()
+        plumber_table = table_clip.find_table(table_settings)
+        table['settings'] = table_settings
+        table['cells'] = plumber_table.cells
+        table['text'] = plumber_table.extract()
 
         if img_path != None:
             im = table_clip.to_image(resolution=300)
@@ -76,8 +80,6 @@ class TableExtractor:
             im.debug_tablefinder(table_settings)
             im.save(img_path)
 
-        table['settings'] = table_settings
-        table['cells'] = table_clip.extract_table(table_settings)
         return table
 
     def extractTables(self, page_index=None, img_path=None):
@@ -141,9 +143,8 @@ def pdfplumber_table_extraction(table):
     return table_settings
 
 if __name__ == '__main__':  
-    te = TableExtractor(path="examples/pdf/FDX/2017/page_83.pdf", separate_units=True)
+    te = TableExtractor(path="examples/pdf/FDX/2017/page_36.pdf", separate_units=False)
     tables = te.extractTables(page_index=0, img_path='table.png')
-    dataframe = te.tableToDataframe(tables[0]['cells'])
-    #dataframes = [te.tableToDataframe(table) for table in tables]
-    print(dataframe)
-    te.export('excel', 'test', dataframe=dataframe)
+    
+    dataframes = [te.tableToDataframe(table['text']) for table in tables]
+    for i, df in enumerate(dataframes): te.export('excel', f'test_{i}', dataframe=df)
