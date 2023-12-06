@@ -2,10 +2,11 @@ import pdfplumber
 from table_finder import TableFinder
 import copy
 class LayoutExtractor:
-    def __init__(self, table, clipping) -> None:
+    def __init__(self, table, clipping, separate_units=False) -> None:
         self.table = table
         self.clipping = clipping
         self.table_lines = sorted(self.table['lines'], key=lambda e: e['top'])
+        self.separate_units = separate_units
 
     def find_columns(self, max_diff, special_symbols):
         '''
@@ -31,7 +32,7 @@ class LayoutExtractor:
                     separator.append({'x0': char['x0'], 'top': top, 'x1': char['x0'], 'bottom': bottom, 'object_type': 'line', 'height': bottom-top})
 
                 # special characters can be defined such as $ or % that are treated as separate columns
-                if chars[0]['text'] in special_symbols or char['text'] in special_symbols:
+                if self.separate_units and (chars[0]['text'] in special_symbols or char['text'] in special_symbols):
                     rect = self.find_unit_column(char)
                     self.separate_unit_column(rect)
                     separator.append(rect)

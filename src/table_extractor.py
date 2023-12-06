@@ -6,10 +6,11 @@ from table_finder import TableFinder
 from layout_extractor import LayoutExtractor
 
 class TableExtractor:
-    def __init__(self, path):
+    def __init__(self, path, separate_units=False):
         self.path = path
         pdf = pdfplumber.open(path)
         self.pages = pdf.pages
+        self.separate_units = separate_units
 
     def tableToDataframe(self, table):
         '''
@@ -59,7 +60,7 @@ class TableExtractor:
                 table = tf.find_tables(bottom_threshold=threshold)[table_index]
 
             table_clip = page.crop(table['bbox'])
-            le = LayoutExtractor(table, table_clip)
+            le = LayoutExtractor(table, table_clip, separate_units=self.separate_units)
             footnote_complete, _, _ = le.find_layout(5, 2, ['$', '%'])
 
             threshold += 5
