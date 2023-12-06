@@ -19,8 +19,8 @@ class TableExtractor:
         tuples = []
         i=0
         header = table[0]
-        while i < len(header)-1:
-            if header[i] != None and header[i+1] != None:
+        while i < len(header):
+            if header[i] != None and (i+1 == len(header) or header[i+1] != None):
                 tuples.append((header[i], ''))
             elif header[i] != None:
                 tuples.extend([(header[i], ''), (header[i], '')])
@@ -141,9 +141,9 @@ def pdfplumber_table_extraction(table):
     return table_settings
 
 if __name__ == '__main__':  
-    te = TableExtractor(path="examples/pdf/FDX/2017/page_83.pdf")
+    te = TableExtractor(path="examples/pdf/FDX/2017/page_83.pdf", separate_units=True)
     tables = te.extractTables(page_index=0, img_path='table.png')
     dataframe = te.tableToDataframe(tables[0]['cells'])
     #dataframes = [te.tableToDataframe(table) for table in tables]
     print(dataframe)
-    te.export('excel', 't', dataframe=dataframe)
+    te.export('excel', 'test', dataframe=dataframe)
