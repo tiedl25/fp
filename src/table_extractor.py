@@ -29,6 +29,17 @@ class TableExtractor:
         columns = pd.MultiIndex.from_tuples(tuples)
 
         return pd.DataFrame(table[1:], columns=columns)
+    
+    def export(self, format, path, dataframe=None, table=None):
+        if dataframe is None:
+            if table is None:
+                return
+            dataframe = self.tableToDataframe(table)
+
+        if format == 'excel':
+            return dataframe.to_excel(f'{path}.xlsx')    
+        elif format == 'csv':
+            return dataframe.to_latex(f'{path}.csv', index=False)      
 
     def extractTable(self, page, table_index=0, table=None, img_path=None):
         '''
@@ -134,3 +145,4 @@ if __name__ == '__main__':
     dataframe = te.tableToDataframe(tables[0]['cells'])
     #dataframes = [te.tableToDataframe(table) for table in tables]
     print(dataframe)
+    te.export('excel', 't', dataframe=dataframe)
