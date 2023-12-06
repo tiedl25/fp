@@ -143,8 +143,6 @@ class LayoutExtractor:
             "explicit_horizontal_lines": horizontal_lines
         }
 
-        t = self.clipping.extract_tables(table_settings)
-
         return table_settings
 
     def find_layout(self, x_space, y_space, symbols):
@@ -159,7 +157,7 @@ class LayoutExtractor:
 
 
 if __name__ == '__main__':
-    path = "examples/pdf/FDX/2017/page_83.pdf"
+    path = "examples/pdf/FDX/2017/page_26.pdf"
 
     with pdfplumber.open(path) as pdf:
         page = pdf.pages[0]
@@ -176,6 +174,5 @@ if __name__ == '__main__':
     table_settings = le.find_cells()
 
     im.debug_tablefinder(table_settings)
-    table = table_clip.extract_table(table_settings)
     
     im.save('table.png')
