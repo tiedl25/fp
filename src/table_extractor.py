@@ -12,6 +12,9 @@ class TableExtractor:
         self.pages = pdf.pages
 
     def tableToDataframe(self, table):
+        '''
+            Create a dataframe from table cells. Header cells with none type are merged with the next column.
+        '''
         tuples = []
         i=0
         header = table[0]
@@ -66,6 +69,9 @@ class TableExtractor:
         return table
 
     def extractTables(self, page_index=None, img_path=None):
+        ''' 
+            Extract multiple tables.
+        '''
         tables = []
         if page_index != None:
             page = copy.copy(self.pages[page_index])
@@ -125,6 +131,6 @@ def pdfplumber_table_extraction(table):
 if __name__ == '__main__':  
     te = TableExtractor(path="examples/pdf/FDX/2017/page_83.pdf")
     tables = te.extractTables(page_index=0, img_path='table.png')
-    dataframe = te.tableToDataframe(tables[0])
+    dataframe = te.tableToDataframe(tables[0]['cells'])
     #dataframes = [te.tableToDataframe(table) for table in tables]
     print(dataframe)
