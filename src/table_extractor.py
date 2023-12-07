@@ -147,4 +147,4 @@ if __name__ == '__main__':
     tables = te.extractTables(page_index=0, img_path='table.png')
     
     dataframes = [te.tableToDataframe(table['text']) for table in tables]
-    for i, df in enumerate(dataframes): te.export('excel', f'test_{i}', dataframe=df)
+    for i, df in enumerate(dataframes): te.export('excel', f'excel/test_{i}', dataframe=df)

@@ -51,6 +51,9 @@ class LayoutExtractor:
         footnote_complete = None
         footnote_separator = []
 
+        if chars[0]['text'] == " ":
+            chars.pop(0)
+
         i=0
         while i < len(chars)-1:
             if chars[i+1]['text'] == " ":
@@ -126,6 +129,7 @@ class LayoutExtractor:
     def find_cells(self):
         vertical_lines = [self.table['bbox'][0], self.table['bbox'][2]] # left and right line
         horizontal_lines = [self.table['header'], self.table['footer']] # top and bottom line
+        #horizontal_lines.extend(self.table['lines'])
         if "column_separator" in vars(self).keys():
             vertical_lines.extend(self.column_separator)
         if "row_separator" in vars(self).keys():
@@ -158,19 +162,19 @@ class LayoutExtractor:
 
 
 if __name__ == '__main__':
-    path = "examples/pdf/FDX/2017/page_26.pdf"
+    path = "examples/pdf/FDX/2017/page_36.pdf"
 
     with pdfplumber.open(path) as pdf:
         page = pdf.pages[0]
         t_finder = TableFinder(page)
         tables = t_finder.find_tables()
-        table_clip = page.crop(tables[0]['bbox'])
+        table_clip = page.crop(tables[1]['bbox'])
 
-    le = LayoutExtractor(tables[0], table_clip)
+    le = LayoutExtractor(tables[1], table_clip)
     footnote_complete, column_separator, row_separator = le.find_layout(5, 2, ['$', '%'])
         
     im = table_clip.to_image(resolution=300)
-    im.draw_lines(tables[0]['lines'], stroke_width=3, stroke=(0,0,0))
+    #im.draw_lines(tables[0]['lines'], stroke_width=3, stroke=(0,0,0))
 
     table_settings = le.find_cells()
 
