@@ -2,8 +2,8 @@ import pandas as pd
 import pdfplumber
 import copy
 
-from table_finder import TableFinder
-from layout_extractor import LayoutExtractor
+from .table_finder import TableFinder
+from .layout_extractor import LayoutExtractor
 
 class TableExtractor:
     def __init__(self, path, separate_units=False):

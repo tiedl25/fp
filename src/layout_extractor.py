@@ -1,6 +1,7 @@
 import pdfplumber
-from table_finder import TableFinder
+from .table_finder import TableFinder
 import copy
+
 class LayoutExtractor:
     def __init__(self, table, clipping, separate_units=False) -> None:
         self.table = table
