@@ -72,7 +72,14 @@ class TableExtractor:
         plumber_table = table_clip.find_table(table_settings)
         table['settings'] = table_settings
         table['cells'] = plumber_table.cells
-        table['text'] = plumber_table.extract()
+        table['text'] = plumber_table.extract(x_tolerance=2)
+
+        modified_list_of_lists = [
+            [s.replace('\n', ' ') for s in inner_list]
+            for inner_list in table['text']
+        ]
+
+        table['text'] = modified_list_of_lists
 
         if img_path != None:
             im = table_clip.to_image(resolution=300)
