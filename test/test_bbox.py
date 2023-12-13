@@ -7,7 +7,7 @@ import os
 import json
 
 if __name__ == '__main__':
-    path = "examples/pdf/FDX/2017"
+    path = "fintabnet/pdf/DOV/2012"
     files = os.listdir(path)
 
     with open('examples/examples.jsonl') as f:

@@ -57,7 +57,11 @@ class TableExtractor:
             if table == None or threshold > 5:
                 page = copy.copy(self.pages[0])
                 tf = TableFinder(page)
-                table = tf.find_tables(bottom_threshold=threshold)[table_index]
+                tables = tf.find_tables(bottom_threshold=threshold)
+
+                if table_index >= len(tables):
+                    return None
+                table = tables[table_index]
 
             table_clip = page.crop(table['bbox'])
             le = LayoutExtractor(table, table_clip, separate_units=self.separate_units)
@@ -70,12 +74,14 @@ class TableExtractor:
         
         table_settings = le.find_cells()
         plumber_table = table_clip.find_table(table_settings)
+        if plumber_table == None:
+            return None
         table['settings'] = table_settings
         table['cells'] = plumber_table.cells
         table['text'] = plumber_table.extract(x_tolerance=2)
 
         modified_list_of_lists = [
-            [s.replace('\n', ' ') for s in inner_list]
+            [s.replace('\n', ' ') for s in inner_list if s != None]
             for inner_list in table['text']
         ]
 

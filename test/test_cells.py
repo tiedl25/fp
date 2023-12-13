@@ -51,7 +51,7 @@ if __name__ == '__main__':
             continue
 
         te = TableExtractor(path=f"{path}/{file}", separate_units=False)
-        tables = te.extractTables(page_index=0, img_path='table.png')
+        tables = te.extractTables(page_index=0)
         page = te.pages[0]
 
         if len(tables) > 0 or len(test_tables_grouped[test_table_index]['filename']) > 0:

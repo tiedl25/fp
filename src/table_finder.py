@@ -22,7 +22,7 @@ class TableFinder:
         return max_diff
 
     def find_table_top(self, bbox, max_diff):
-        chars = sorted(self.page.crop(bbox).chars, key=lambda e: e['top'])
+        chars = sorted(self.page.crop(bbox, strict=False).chars, key=lambda e: e['top'])
         chars.reverse()
         chars.insert(0, {'top': bbox[3], 'bottom': bbox[3], 'text': '_'})
 
@@ -34,13 +34,13 @@ class TableFinder:
             else:
                 diff = chars[i]['top'] - chars[i+1]['bottom']
                 if diff > max_diff:
-                    return chars[i]['top'] - 1   
+                    return chars[i]['top']
                 i+=1
 
-        return chars[len(chars)-1]['top'] - 1
+        return chars[len(chars)-1]['top']
 
     def find_table_bottom(self, bbox, max_diff):
-        chars = sorted(self.page.crop(bbox).chars, key=lambda e: e['bottom'])
+        chars = sorted(self.page.crop(bbox, strict=False).chars, key=lambda e: e['bottom'])
         chars.insert(0, {'top': bbox[1], 'bottom': bbox[1], 'text': '_'})
 
         i=0
@@ -51,13 +51,16 @@ class TableFinder:
             else:
                 diff = chars[i+1]['top'] - chars[i]['bottom']
                 if diff > max_diff:
-                    return chars[i]['bottom'] + 1
+                    return chars[i]['bottom']
                 i+=1
 
 
-        return chars[len(chars)-1]['bottom'] +1
+        return chars[len(chars)-1]['bottom']
     
     def find_table_left(self, bbox, max_diff):
+        if bbox[0] == bbox[2]:
+            return self.page.bbox[0]
+
         chars = sorted(self.page.crop(bbox).chars, key=lambda e: e['x1'])
         chars.reverse()
         chars.insert(0, {'x0': bbox[2], 'x1': bbox[2], 'text': '_'})
@@ -70,13 +73,16 @@ class TableFinder:
             else:
                 diff = chars[i]['x0'] - chars[i+1]['x1']
                 if diff > max_diff:
-                    return chars[i]['x0'] -1
+                    return chars[i]['x0']
                 i+=1
 
 
-        return chars[len(chars)-1]['x0'] -1
+        return chars[len(chars)-1]['x0']
     
     def find_table_right(self, bbox, max_diff):
+        if bbox[2] == bbox[0]:
+            return self.page.bbox[2]
+
         chars = sorted(self.page.crop(bbox).chars, key=lambda e: e['x0'])
         chars.insert(0, {'x0': bbox[0], 'x1': bbox[0], 'text': '_'})
 
@@ -88,17 +94,19 @@ class TableFinder:
             else:
                 diff = chars[i+1]['x0'] - chars[i]['x1']
                 if diff > max_diff:
-                    return chars[i]['x1'] + 1
+                    return chars[i]['x1']
                 i+=1
 
 
-        return chars[len(chars)-1]['x1'] +1
+        return chars[len(chars)-1]['x1']
 
     def concat_lines(self, lst):
         '''
             Concatenate line elements with the same distance to the top of the page, that are not recognized as one
         '''
         concat_lines = []
+        if len(lst) == 0:
+            return concat_lines
         current_line = lst.pop(0)
 
         for i, line in enumerate(lst):
@@ -108,8 +116,13 @@ class TableFinder:
                     current_line['width'] = current_line['width'] + line['width']
                     current_line['pts'][1] = line['pts'][1]
             else:
+                if current_line['x0'] < 0 or current_line['y1'] < 0 or current_line['top'] < self.page.bbox[1]:
+                    continue
                 concat_lines.append(current_line)
                 current_line = line
+
+        if current_line['x0'] < 0 or current_line['y1'] < 0 or current_line['top'] < self.page.bbox[1]:
+            return concat_lines
 
         concat_lines.append(current_line) #append last line also to concat_lines
 
@@ -208,17 +221,26 @@ class TableFinder:
         '''
             Find tables in a given pdf page
         '''
+        self.lines = [x for x in self.lines if x['x0'] != x['x1']] # remove vertical lines
+
         self.lines.sort(key = lambda e: e['top'])
-        self.lines = self.concat_lines(self.page.lines)
+        self.lines = self.concat_lines(self.lines)
         for i, line in enumerate(self.lines):
             #if line['non_stroking_color'] != None and len(line['non_stroking_color']) > 2:
             #    if line['stroking_color'] != line['non_stroking_color']:
             #        continue
+
+            if line['x0'] >= line['x1']:
+                continue
             
-            bottom = self.find_table_bottom([line['x0'], line['top'], line['x1'], self.page.height], bottom_threshold)
-            top = self.find_table_top([line['x0'], 0, line['x1'], line['bottom']], top_threshold)
-            left = self.find_table_left([0, top, line['x0'], bottom], left_threshold)
-            right = self.find_table_right([line['x1'], top, self.page.width, bottom], right_threshold)
+            bottom = self.find_table_bottom([line['x0'], line['top'], line['x1'], self.page.bbox[3]], bottom_threshold)
+            top = self.find_table_top([line['x0'], self.page.bbox[1], line['x1'], line['bottom']], top_threshold)
+
+            if top >= bottom:
+                continue
+                
+            left = self.find_table_left([self.page.bbox[0], top, line['x0'], bottom], left_threshold)
+            right = self.find_table_right([line['x1'], top, self.page.bbox[2], bottom], right_threshold)
 
             bbox = [left, top, right, bottom]
             

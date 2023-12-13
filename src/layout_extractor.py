@@ -52,7 +52,7 @@ class LayoutExtractor:
         footnote_complete = None
         footnote_separator = []
 
-        if chars[0]['text'] == " ":
+        if len(chars) > 0 and chars[0]['text'] == " ":
             chars.pop(0)
 
         i=0
