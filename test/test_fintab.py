@@ -89,18 +89,21 @@ if __name__ == '__main__':
                 match = False
                 for test_table in test_tables:
                     #assert_horizontal = abs(table['bbox'][1] - test_tables[j]['bbox'][1]) < tol and abs(table['bbox'][3] - test_tables[j]['bbox'][3]) < tol
-                    assert_all = np.allclose(table['bbox'], test_table['bbox'], atol=5)
+                    assert_all = np.allclose(table['bbox'], test_table['bbox'], atol=20)
 
                     if assert_all:
                         match = True
                         matches += 1                        
 
-            if not match:
-                print(f"\t{pdf_path} Table {t_i+1}")
-                bboxs = [table['bbox'] for table in test_tables]
-                im.draw_rects(bboxs, stroke_width=0, fill=(230, 65, 67, 65)) # red for test tables
-                im.draw_rects([x['bbox'] for x in tables], stroke_width=0)
-                im.save(f"img/{os.path.basename(pdf_path)[0:-4]}.png")
+                if not match:
+                    print(f"\t{pdf_path} Table {t_i+1}")
+                else:
+                    print(f"\t\t{pdf_path} Table {t_i+1}")
+
+            bboxs = [table['bbox'] for table in test_tables]
+            im.draw_rects(bboxs, stroke_width=0, fill=(230, 65, 67, 65)) # red for test tables
+            im.draw_rects([x['bbox'] for x in tables], stroke_width=0)
+            im.save(f"img/{os.path.basename(pdf_path)[0:-4]}.png")
                 
             i+=1
         

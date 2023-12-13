@@ -217,18 +217,54 @@ class TableFinder:
         self.tables = derived_tables
         return table
 
+    def extend_table(self, bbox, bottom_threshold=5, top_threshold=4, left_threshold=2, right_threshold=2):
+        """
+        Extends the table bounding box in all four directions (bottom, top, left, right) based on the given thresholds.
+
+        Parameters:
+            bbox (list): The current bounding box of the table in the format [left, top, right, bottom].
+            bottom_threshold (int): The maximum number of pixels to extend the bottom of the table.
+            top_threshold (int): The maximum number of pixels to extend the top of the table.
+            left_threshold (int): The maximum number of pixels to extend the left of the table.
+            right_threshold (int): The maximum number of pixels to extend the right of the table.
+
+        Returns:
+            list: The updated bounding box of the table in the format [left, top, right, bottom].
+        """
+        bbox_old = bbox
+        while True:
+            bottom = self.find_table_bottom([bbox[0], bbox[3], bbox[2], self.page.bbox[3]], bottom_threshold)
+            top = self.find_table_top([bbox[0], self.page.bbox[1], bbox[2], bbox[1]], top_threshold)
+            left = self.find_table_left([self.page.bbox[0], top, bbox[0], bottom], left_threshold)
+            right = self.find_table_right([bbox[2], top, self.page.bbox[2], bottom], right_threshold)
+
+            bbox = [left, top, right, bottom]
+
+            if bbox_old == bbox:
+                break
+            bbox_old = bbox
+
+        return bbox
+
     def find_tables(self, bottom_threshold=5, top_threshold=4, left_threshold=2, right_threshold=2):
-        '''
-            Find tables in a given pdf page
-        '''
+        """
+        Finds tables in the given document based on certain thresholds.
+        
+        Args:
+            bottom_threshold (int): The threshold for the bottom position of a table. Default is 5.
+            top_threshold (int): The threshold for the top position of a table. Default is 4.
+            left_threshold (int): The threshold for the left position of a table. Default is 2.
+            right_threshold (int): The threshold for the right position of a table. Default is 2.
+        
+        Returns:
+            list: A list of derived tables found in the document.
+        """
         self.lines = [x for x in self.lines if x['x0'] != x['x1']] # remove vertical lines
 
         self.lines.sort(key = lambda e: e['top'])
         self.lines = self.concat_lines(self.lines)
         for i, line in enumerate(self.lines):
-            #if line['non_stroking_color'] != None and len(line['non_stroking_color']) > 2:
-            #    if line['stroking_color'] != line['non_stroking_color']:
-            #        continue
+            bbox_old = [0,0,0,0]
 
             if line['x0'] >= line['x1']:
                 continue
@@ -243,7 +279,9 @@ class TableFinder:
             right = self.find_table_right([line['x1'], top, self.page.bbox[2], bottom], right_threshold)
 
             bbox = [left, top, right, bottom]
-            
+
+            bbox = self.extend_table(bbox)
+
             table = {'bbox': bbox, 'lines': [line]}
 
             self.tables.append(table)
