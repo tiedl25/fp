@@ -1,3 +1,4 @@
+import time
 import __init__
 from src.table_extractor import TableExtractor
 from src.table_finder import TableFinder
@@ -6,9 +7,9 @@ import numpy as np
 import os
 import json
 import pdfplumber
-import threading
 import concurrent.futures
-import multiprocessing
+from threading import Thread
+from queue import Queue
 
 def getPdfPaths(path):
     path = path + '/pdf'
@@ -19,14 +20,14 @@ def getPdfPaths(path):
                 pdfs.append(os.path.join(root.lstrip(path), file))
     return pdfs
 
-def extractAnnotatedTables(path):
+def extractAnnotatedTables(path, subset=None):
     test_dataset = []
     with open(f"{path}/FinTabNet_1.0.0_table_test.jsonl") as f:
         test_dataset = [json.loads(line) for line in f]
         
     
     test_dataset.sort(key = lambda e: e['filename'])
-    #test_dataset = test_dataset[0:1000]
+    if subset != None:  test_dataset = test_dataset[0:subset]
 
     total = len(test_dataset)
 
@@ -44,10 +45,10 @@ def extractAnnotatedTables(path):
 
     return test_tables_grouped, total
 
-def test(pdf_paths, annotated_tables):
-    matches = 0
+def test(pdf_paths, annotated_tables, draw=False, tol=5):
     i = 0
-    tol = 5
+    match_list = []
+    mismatch_list = []
 
     for pdf_path in pdf_paths:
         if i >= len(annotated_tables):
@@ -67,10 +68,9 @@ def test(pdf_paths, annotated_tables):
 
         # Check if there are any tables
         if len(tables) > 0 or len(annotated_tables[i]['tables']) > 0:
-            #im = page.to_image(resolution=300)
-
             test_tables = annotated_tables[i]['tables']
 
+            # reorder coordinates
             for test_table in test_tables:
                 bbox = test_table['bbox']
                 bbox3 = bbox[3]
@@ -78,58 +78,62 @@ def test(pdf_paths, annotated_tables):
                 bbox[1] = page.height - bbox3
 
             for t_i, table in enumerate(tables):
-                match = False
                 for test_table in test_tables:
-                    #assert_horizontal = abs(table['bbox'][1] - test_tables[j]['bbox'][1]) < tol and abs(table['bbox'][3] - test_tables[j]['bbox'][3]) < tol
+                    if np.allclose(table['bbox'], test_table['bbox'], atol=tol):
+                        match_list.append(f"\t{pdf_path} Table {t_i+1}")
+                        break   
+                else:      
+                    mismatch_list.append(f"\t{pdf_path} Table {t_i+1}")
 
-                    assert_all = np.allclose(table['bbox'], test_table['bbox'], atol=20)
-
-                    if assert_all:
-                        match = True
-                        matches += 1                        
-
-                #if not match:
-                #    print(f"\t{pdf_path} Table {t_i+1}")
-                #else:
-                #    print(f"\t\t{pdf_path} Table {t_i+1}")
-
-            #bboxs = [table['bbox'] for table in test_tables]
-            #im.draw_rects(bboxs, stroke_width=0, fill=(230, 65, 67, 65)) # red for test tables
-            #im.draw_rects([x['bbox'] for x in tables], stroke_width=0)
-            #im.save(f"img/{pdf_path.replace('/', '_')[0:-4]}.png")
+            if draw:
+                im = page.to_image(resolution=300)
+                bboxs = [table['bbox'] for table in test_tables]
+                im.draw_rects(bboxs, stroke_width=0, fill=(230, 65, 67, 65)) # red for test tables
+                im.draw_rects([x['bbox'] for x in tables], stroke_width=0)
+                im.save(f"img/{pdf_path.replace('/', '_')[0:-4]}.png")
                 
             i+=1
 
-    return matches
+    return match_list, mismatch_list
+
+
+def loading_sequence(queue):
+    symbols = ['-', '\\', '|', '/']
+    index = 0
+    while True:
+        time.sleep(1)
+        print(symbols[index % len(symbols)], end='\r', flush=True)
+        index += 1
+        if queue.empty() == False:
+            break
 
 if __name__ == '__main__':
+    # Start the loading sequence in a separate process
+    q = Queue()
+    loading_thread = Thread(target=loading_sequence, args=(q,))
+    loading_thread.start()
+
     dataset_path = "fintabnet"
     pdf_paths = getPdfPaths(dataset_path)
 
-    annotated_tables, total = extractAnnotatedTables(dataset_path)   
+    annotated_tables, total = extractAnnotatedTables(dataset_path, 3000)   
 
     pdf_paths.sort()
 
-    print("Doesn't match:")
-
-    batch_number = 500
-    batches = int(total / batch_number)
+    batch_size = 600
+    tol = 5
+    batches = int(total / batch_size)
     thread = []
     total_matches = 0
 
-    #total_matches = test(pdf_paths, annotated_tables)
-
     with concurrent.futures.ProcessPoolExecutor() as executor:
-        matches = [executor.submit(test, pdf_paths, annotated_tables[i*batch_number:(i+1)*batch_number]) for i in range(batches)]
+        matches = [executor.submit(test, pdf_paths, annotated_tables[i*batch_size:(i+1)*batch_size], tol=tol) for i in range(batches)]
         for m in matches:
-            total_matches += m.result()
+            match_list, mismatch_list = m.result()
+            total_matches += len(match_list)
 
-    #for i in range(batches):
-    #    thread.append(multiprocessing.Process(target=test, args=(pdf_paths, annotated_tables[i*200:(i+1)*200],)))
-    #    thread[i].start()
-#
-    #for t in thread:
-    #    t.join()
-    #    total_matches += t.result()
+    q.put(True)
+
+    loading_thread.join()
 
     print(f"Matches: {total_matches}/{total}\t{total_matches/total*100} %")
