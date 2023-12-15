@@ -21,10 +21,10 @@ class TableFinder:
 
         return max_diff
 
-    def find_table_top(self, bbox, max_diff):
+    def find_table_top(self, bbox, max_diff, must_contain_chars=True):
         chars = sorted(self.page.crop(bbox, strict=False).chars, key=lambda e: e['top'])
         chars.reverse()
-        chars.insert(0, {'top': bbox[3], 'bottom': bbox[3], 'text': '_'})
+        if not must_contain_chars: chars.insert(0, {'top': bbox[3], 'bottom': bbox[3], 'text': '_'})
 
         i=0
         while i < len(chars)-1:
@@ -37,7 +37,7 @@ class TableFinder:
                     return chars[i]['top']
                 i+=1
 
-        return chars[len(chars)-1]['top']
+        return chars[len(chars)-1]['top'] if len(chars) > 0 else bbox[3]
 
     def find_table_bottom(self, bbox, max_diff):
         chars = sorted(self.page.crop(bbox, strict=False).chars, key=lambda e: e['bottom'])
@@ -244,7 +244,7 @@ class TableFinder:
         bbox_old = bbox
         while True:
             bottom = self.find_table_bottom([bbox[0], bbox[3], bbox[2], self.page.bbox[3]], bottom_threshold)
-            top = self.find_table_top([bbox[0], self.page.bbox[1], bbox[2], bbox[1]], top_threshold)
+            top = self.find_table_top([bbox[0], self.page.bbox[1], bbox[2], bbox[1]], top_threshold, must_contain_chars=False)
             left = self.find_table_left([self.page.bbox[0], top, bbox[0], bottom], left_threshold)
             right = self.find_table_right([bbox[2], top, self.page.bbox[2], bottom], right_threshold)
 
