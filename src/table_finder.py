@@ -127,6 +127,16 @@ class TableFinder:
         concat_lines.append(current_line) #append last line also to concat_lines
 
         return concat_lines
+    
+    def collapse_rects(self):
+        lines = []
+
+        for i, rect in enumerate(self.page.rects):
+            if rect['height'] < 1 and rect['fill'] == True:
+                rect['object_type'] = "line"
+                lines.append(rect)
+
+        return lines
 
     def derive_tables(self):
         '''
@@ -260,12 +270,10 @@ class TableFinder:
             list: A list of derived tables found in the document.
         """
         self.lines = [x for x in self.lines if x['x0'] != x['x1']] # remove vertical lines
-
+        self.lines.extend(self.collapse_rects())
         self.lines.sort(key = lambda e: e['top'])
         self.lines = self.concat_lines(self.lines)
         for i, line in enumerate(self.lines):
-            bbox_old = [0,0,0,0]
-
             if line['x0'] >= line['x1']:
                 continue
             
@@ -310,13 +318,16 @@ class TableFinder:
                     break
 
             self.tables = derived_tables
+
+        #for t in self.tables:
+        #    t['bbox'] = self.extend_table(t['bbox'])
         
         return derived_tables
     
 if __name__ == '__main__':
     tables = []
 
-    with pdfplumber.open("fintabnet/pdf/AKAM/2005/page_49.pdf") as pdf:
+    with pdfplumber.open("fintabnet/pdf/ADS/2008/page_101.pdf") as pdf:
         page = pdf.pages[0]
         t_finder = TableFinder(page)
         tables = t_finder.find_tables()
