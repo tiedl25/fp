@@ -217,7 +217,7 @@ class TableFinder:
         self.tables = derived_tables
         return table
 
-    def extend_table(self, bbox, bottom_threshold=5, top_threshold=4, left_threshold=2, right_threshold=2):
+    def extend_table(self, bbox, bottom_threshold=5, top_threshold=4, left_threshold=5, right_threshold=2):
         """
         Extends the table bounding box in all four directions (bottom, top, left, right) based on the given thresholds.
 
@@ -278,6 +278,12 @@ class TableFinder:
             left = self.find_table_left([self.page.bbox[0], top, line['x0'], bottom], left_threshold)
             right = self.find_table_right([line['x1'], top, self.page.bbox[2], bottom], right_threshold)
 
+            mid = self.page.width/2
+            objs = self.page.crop([mid-5, top, mid+5, bottom])
+            objs = objs.chars + objs.lines
+            if len(objs) > 0:#not ((mid-5 < left and mid-5 < right) or (mid+5 > left and mid+5 > right)):
+                left = self.find_table_left([self.page.bbox[0], top, left, bottom], 50)
+
             bbox = [left, top, right, bottom]
 
             bbox = self.extend_table(bbox)
@@ -310,7 +316,7 @@ class TableFinder:
 if __name__ == '__main__':
     tables = []
 
-    with pdfplumber.open("examples/pdf/FDX/2017/page_80.pdf") as pdf:
+    with pdfplumber.open("fintabnet/pdf/AKAM/2005/page_49.pdf") as pdf:
         page = pdf.pages[0]
         t_finder = TableFinder(page)
         tables = t_finder.find_tables()

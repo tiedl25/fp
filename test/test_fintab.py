@@ -1,3 +1,4 @@
+import copy
 import time
 import __init__
 from src.table_extractor import TableExtractor
@@ -10,9 +11,9 @@ import pdfplumber
 import concurrent.futures
 from threading import Thread
 from queue import Queue
+import time
 
 def getPdfPaths(path):
-    path = path + '/pdf'
     pdfs = []
     for root, dirs, files in os.walk(path):
         for file in files:
@@ -22,7 +23,7 @@ def getPdfPaths(path):
 
 def extractAnnotatedTables(path, subset=None):
     test_dataset = []
-    with open(f"{path}/FinTabNet_1.0.0_table_test.jsonl") as f:
+    with open(path) as f:
         test_dataset = [json.loads(line) for line in f]
         
     
@@ -45,7 +46,7 @@ def extractAnnotatedTables(path, subset=None):
 
     return test_tables_grouped, total
 
-def test(pdf_paths, annotated_tables, draw=False, tol=5):
+def test(pdf_paths, annotated_tables, draw=False, tol=5, only_bbox=False):
     i = 0
     match_list = []
     mismatch_list = []
@@ -57,14 +58,16 @@ def test(pdf_paths, annotated_tables, draw=False, tol=5):
         if pdf_path != annotated_tables[i]['filename']:
             continue
         
-        #tableExtractor = TableExtractor(path=f"{dataset_path}/pdf/{pdf_path}", separate_units=False)
-        #tables = tableExtractor.extractTables(page_index=0) # all pdfs contain only one page
-        #page = tableExtractor.pages[0]
-
-        with pdfplumber.open(f"{dataset_path}/pdf/{pdf_path}") as pdf:
-            page = pdf.pages[0]
-            tableExtractor = TableFinder(page)
-            tables = tableExtractor.find_tables(left_threshold=20, right_threshold=20)
+        if only_bbox:
+            with pdfplumber.open(f"{dataset_path}/pdf/{pdf_path}") as pdf:
+                page = pdf.pages[0]
+                tableExtractor = TableFinder(page)
+                tables = tableExtractor.find_tables(left_threshold=10, right_threshold=5)
+                
+        else:
+            tableExtractor = TableExtractor(path=f"{dataset_path}/pdf/{pdf_path}", separate_units=False)
+            tables = tableExtractor.extractTables(page_index=0) # all pdfs contain only one page
+            page = tableExtractor.pages[0]
 
         # Check if there are any tables
         if len(tables) > 0 or len(annotated_tables[i]['tables']) > 0:
@@ -99,35 +102,38 @@ def test(pdf_paths, annotated_tables, draw=False, tol=5):
 
 def loading_sequence(queue):
     symbols = ['-', '\\', '|', '/']
-    index = 0
+    i = 0
     while True:
         time.sleep(1)
-        print(symbols[index % len(symbols)], end='\r', flush=True)
-        index += 1
+        print(f"{symbols[i % len(symbols)]} | {i} seconds", end='\r', flush=True)
+        i += 1
         if queue.empty() == False:
             break
 
 if __name__ == '__main__':
+    s0 = time.time()
+
     # Start the loading sequence in a separate process
     q = Queue()
     loading_thread = Thread(target=loading_sequence, args=(q,))
     loading_thread.start()
 
     dataset_path = "fintabnet"
-    pdf_paths = getPdfPaths(dataset_path)
+    pdf_paths = getPdfPaths(dataset_path + '/pdf')
 
-    annotated_tables, total = extractAnnotatedTables(dataset_path, 3000)   
+    annotated_tables, total = extractAnnotatedTables(dataset_path + "/FinTabNet_1.0.0_table_test.jsonl", 250)   
 
     pdf_paths.sort()
 
-    batch_size = 600
-    tol = 5
+    batch_size = 50
+    tol = 20
     batches = int(total / batch_size)
+    batches = 1 if batches < 1 else batches
     thread = []
     total_matches = 0
 
     with concurrent.futures.ProcessPoolExecutor() as executor:
-        matches = [executor.submit(test, pdf_paths, annotated_tables[i*batch_size:(i+1)*batch_size], tol=tol) for i in range(batches)]
+        matches = [executor.submit(test, pdf_paths, annotated_tables[i*batch_size:(i+1)*batch_size], tol=tol, draw=True, only_bbox=True) for i in range(batches)]
         for m in matches:
             match_list, mismatch_list = m.result()
             total_matches += len(match_list)
@@ -137,3 +143,6 @@ if __name__ == '__main__':
     loading_thread.join()
 
     print(f"Matches: {total_matches}/{total}\t{total_matches/total*100} %")
+
+    s1 = time.time()
+    print(f"{(s1-s0) / 60} minutes")
