@@ -92,7 +92,7 @@ def test(pdf_paths, annotated_tables, draw=False, tol=5, only_bbox=False):
                 im = page.to_image(resolution=300)
                 bboxs = [table['bbox'] for table in test_tables]
                 im.draw_rects(bboxs, stroke_width=0, fill=(230, 65, 67, 65)) # red for test tables
-                im.draw_rects([x['bbox'] for x in tables], stroke_width=0)
+                im.draw_rects([[x['bbox'][0], x['header'], x['bbox'][2], x['footer']] for x in tables], stroke_width=0)
                 im.save(f"img/{pdf_path.replace('/', '_')[0:-4]}.png")
                 
             i+=1
@@ -133,7 +133,7 @@ if __name__ == '__main__':
     total_matches = 0
 
     with concurrent.futures.ProcessPoolExecutor() as executor:
-        matches = [executor.submit(test, pdf_paths, annotated_tables[i*batch_size:(i+1)*batch_size], tol=tol, draw=True, only_bbox=True) for i in range(batches)]
+        matches = [executor.submit(test, pdf_paths, annotated_tables[i*batch_size:(i+1)*batch_size], tol=tol, draw=False, only_bbox=True) for i in range(batches)]
         for m in matches:
             match_list, mismatch_list = m.result()
             total_matches += len(match_list)
@@ -145,4 +145,4 @@ if __name__ == '__main__':
     print(f"Matches: {total_matches}/{total}\t{total_matches/total*100} %")
 
     s1 = time.time()
-    print(f"{(s1-s0) / 60} minutes")
+    print(f"{int((s1-s0) / 60)}.{int(s1-s0) % 60} minutes")
