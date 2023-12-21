@@ -1,4 +1,3 @@
-import copy
 import time
 import __init__
 from src.table_extractor import TableExtractor
@@ -62,7 +61,7 @@ def test(pdf_paths, annotated_tables, draw=False, tol=5, only_bbox=False):
             with pdfplumber.open(f"{dataset_path}/pdf/{pdf_path}") as pdf:
                 page = pdf.pages[0]
                 tableExtractor = TableFinder(page)
-                tables = tableExtractor.find_tables(left_threshold=10, right_threshold=5)
+                tables = tableExtractor.find_tables(left_threshold=10, right_threshold=5, bottom_threshold=9, top_threshold=4)
                 
         else:
             tableExtractor = TableExtractor(path=f"{dataset_path}/pdf/{pdf_path}", separate_units=False)
@@ -121,11 +120,11 @@ if __name__ == '__main__':
     dataset_path = "fintabnet"
     pdf_paths = getPdfPaths(dataset_path + '/pdf')
 
-    annotated_tables, total = extractAnnotatedTables(dataset_path + "/FinTabNet_1.0.0_table_test.jsonl", 250)   
+    annotated_tables, total = extractAnnotatedTables(dataset_path + "/FinTabNet_1.0.0_table_test.jsonl", 500)   
 
     pdf_paths.sort()
 
-    batch_size = 50
+    batch_size = 100
     tol = 20
     batches = int(total / batch_size)
     batches = 1 if batches < 1 else batches

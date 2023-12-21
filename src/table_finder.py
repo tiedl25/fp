@@ -21,7 +21,7 @@ class TableFinder:
 
         return max_diff
 
-    def find_table_top(self, bbox, max_diff, must_contain_chars=True):
+    def find_table_top(self, bbox, max_diff, must_contain_chars=False):
         chars = sorted(self.page.crop(bbox, strict=False).chars, key=lambda e: e['top'])
         chars.reverse()
         if not must_contain_chars: chars.insert(0, {'top': bbox[3], 'bottom': bbox[3], 'text': '_'})
@@ -327,7 +327,7 @@ class TableFinder:
 if __name__ == '__main__':
     tables = []
 
-    with pdfplumber.open("fintabnet/pdf/ADS/2008/page_101.pdf") as pdf:
+    with pdfplumber.open("fintabnet/pdf/AKAM/2005/page_60.pdf") as pdf:
         page = pdf.pages[0]
         t_finder = TableFinder(page)
         tables = t_finder.find_tables()
