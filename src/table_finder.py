@@ -1,4 +1,5 @@
 import pdfplumber
+import statistics
 
 class TableFinder:
     def __init__(self, page) -> None:
@@ -6,22 +7,19 @@ class TableFinder:
         self.lines = page.lines
         self.tables = []
 
-    def max_diff(self, lst):
-        '''
-            Find a maximum difference between characters y-values, that is suitable as decision maker between 'inside-table' and 'outside-table'
-        '''
-        # TODO: Implement based on a average line pitch
-        max_diff = float('inf')
-
-        for i in range(len(lst)-1):
-            diff = lst[i+1]['top'] - lst[i]['bottom']
-            if diff != 0: 
-                max_diff = min(max_diff, diff)
-                return max_diff
-
-        return max_diff
-
     def find_table_top(self, bbox, max_diff, must_contain_chars=False):
+        """
+        Find the top boundary of the table within a given bounding box. 
+
+        Args:
+            bbox (tuple): The bounding box coordinates (left, top, right, bottom).
+            max_diff (int): The maximum allowed difference in top position between characters.
+            must_contain_chars (bool, optional): Whether the table must contain characters. Defaults to True.
+
+        Returns:
+            int: The top position of the table.
+
+        """
         chars = sorted(self.page.crop(bbox, strict=False).chars, key=lambda e: e['top'])
         chars.reverse()
         if not must_contain_chars: chars.insert(0, {'top': bbox[3], 'bottom': bbox[3], 'text': '_'})
@@ -40,6 +38,17 @@ class TableFinder:
         return chars[len(chars)-1]['top'] if len(chars) > 0 else bbox[3]
 
     def find_table_bottom(self, bbox, max_diff):
+        """
+        Find the bottom boundary of a table in the given bounding box.
+
+        Parameters:
+            bbox (tuple): The bounding box of the table.
+            max_diff (int): The maximum difference allowed between the top of one character and the bottom of the previous character.
+
+        Returns:
+            int: The bottom coordinate of the table.
+
+        """
         chars = sorted(self.page.crop(bbox, strict=False).chars, key=lambda e: e['bottom'])
         chars.insert(0, {'top': bbox[1], 'bottom': bbox[1], 'text': '_'})
 
@@ -58,6 +67,16 @@ class TableFinder:
         return chars[len(chars)-1]['bottom']
     
     def find_table_left(self, bbox, max_diff):
+        """
+        Find the left boundary of a table within the given bounding box.
+
+        Parameters:
+            bbox (list): The bounding box coordinates of the table as a list of four integers [x0, y0, x1, y1].
+            max_diff (int): The maximum difference in x-coordinate allowed between adjacent characters.
+
+        Returns:
+            int: The leftmost x-coordinate of the table.
+        """
         if bbox[0] == bbox[2]:
             return self.page.bbox[0]
 
@@ -80,6 +99,16 @@ class TableFinder:
         return chars[len(chars)-1]['x0']
     
     def find_table_right(self, bbox, max_diff):
+        """
+        Finds the right boundary of a table within the given bounding box.
+
+        Parameters:
+            bbox (list): The bounding box coordinates of the table.
+            max_diff (int): The maximum allowed difference between adjacent characters.
+
+        Returns:
+            int: The x-coordinate of the rightmost position of the table.
+        """
         if bbox[2] == bbox[0]:
             return self.page.bbox[2]
 
@@ -101,9 +130,15 @@ class TableFinder:
         return chars[len(chars)-1]['x1']
 
     def concat_lines(self, lst):
-        '''
-            Concatenate line elements with the same distance to the top of the page, that are not recognized as one
-        '''
+        """
+        Concatenate line elements with the same distance to the top of the page, that are not recognized as one
+
+        Args:
+            lst (list): A list of dictionaries representing lines.
+
+        Returns:
+            list: A list of dictionaries representing concatenated lines.
+        """
         concat_lines = []
         if len(lst) == 0:
             return concat_lines
@@ -116,12 +151,12 @@ class TableFinder:
                     current_line['width'] = current_line['width'] + line['width']
                     current_line['pts'][1] = line['pts'][1]
             else:
-                if current_line['x0'] < 0 or current_line['y1'] < 0 or current_line['top'] < self.page.bbox[1]:
+                if current_line['x0'] < self.page.bbox[0] or current_line['top'] < self.page.bbox[1]:
                     continue
                 concat_lines.append(current_line)
                 current_line = line
 
-        if current_line['x0'] < 0 or current_line['y1'] < 0 or current_line['top'] < self.page.bbox[1]:
+        if current_line['x0'] < self.page.bbox[0] or current_line['top'] < self.page.bbox[1]:
             return concat_lines
 
         concat_lines.append(current_line) #append last line also to concat_lines
@@ -129,6 +164,17 @@ class TableFinder:
         return concat_lines
     
     def collapse_rects(self):
+        """
+        Collapse the rectangles in the page.
+
+        This function iterates through the list of rectangles in the page and collapses any rectangles 
+        with a height less than 1 and a fill value of True. The collapsed rectangles are then appended 
+        to the list of lines.
+
+        Returns:
+            A list of dictionaries representing the collapsed lines.
+
+        """
         lines = []
 
         for i, rect in enumerate(self.page.rects):
@@ -139,9 +185,15 @@ class TableFinder:
         return lines
 
     def derive_tables(self):
-        '''
-            Look for overlapping tables and merge them together
-        '''
+        """
+        Look for overlapping tables and merge them together
+
+        Parameters:
+            self (object): The object instance.
+        
+        Returns:
+            dict: The derived table.
+        """
         table = self.tables.pop(0)
         derived_tables = []
     
@@ -256,6 +308,18 @@ class TableFinder:
 
         return bbox
 
+    def determine_average_line_height(self):
+        chars = sorted(self.page.chars, key=lambda e: e['bottom'])
+
+        diff = []
+        for i in range(len(chars)-1):
+            if chars[i]['text'] == ' ':
+                continue
+            d = chars[i+1]['bottom'] - chars[i]['top']
+            if d > 0:
+                diff.append(d)
+
+        return statistics.mode(diff)
     def find_tables(self, bottom_threshold=5, top_threshold=4, left_threshold=2, right_threshold=2):
         """
         Finds tables in the given document based on certain thresholds.
@@ -269,6 +333,9 @@ class TableFinder:
         Returns:
             list: A list of derived tables found in the document.
         """
+
+        bottom_threshold = self.determine_average_line_height()
+
         self.lines = [x for x in self.lines if x['x0'] != x['x1']] # remove vertical lines
         self.lines.extend(self.collapse_rects())
         self.lines.sort(key = lambda e: e['top'])
@@ -290,11 +357,13 @@ class TableFinder:
             objs = self.page.crop([mid-5, top, mid+5, bottom])
             objs = objs.chars + objs.lines
             if len(objs) > 0:#not ((mid-5 < left and mid-5 < right) or (mid+5 > left and mid+5 > right)):
-                left = self.find_table_left([self.page.bbox[0], top, left, bottom], 50)
+                left = self.page.bbox[0]#self.find_table_left([self.page.bbox[0], top, left, bottom], 50)
 
             bbox = [left, top, right, bottom]
 
             bbox = self.extend_table(bbox)
+
+            if len(objs) > 0: bbox[0] = self.find_table_left(bbox, 200)
 
             table = {'bbox': bbox, 'lines': [line]}
 
@@ -318,16 +387,13 @@ class TableFinder:
                     break
 
             self.tables = derived_tables
-
-        #for t in self.tables:
-        #    t['bbox'] = self.extend_table(t['bbox'])
         
         return derived_tables
     
 if __name__ == '__main__':
     tables = []
 
-    with pdfplumber.open("fintabnet/pdf/AKAM/2005/page_60.pdf") as pdf:
+    with pdfplumber.open("fintabnet/pdf/AAL/2003/page_64.pdf") as pdf:
         page = pdf.pages[0]
         t_finder = TableFinder(page)
         tables = t_finder.find_tables()

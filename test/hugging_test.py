@@ -3,6 +3,9 @@ import __init__
 from src.table_extractor import TableExtractor
 from src.table_finder import TableFinder
 
+from ultralyticsplus import YOLO, render_result
+
+
 import numpy as np
 import os
 import json
@@ -20,14 +23,14 @@ def getPdfPaths(path):
                 pdfs.append(os.path.join(root.lstrip(path), file))
     return pdfs
 
-def extractAnnotatedTables(path, sub_start=0, sub_end=-1):
+def extractAnnotatedTables(path, subset=None):
     test_dataset = []
     with open(path) as f:
         test_dataset = [json.loads(line) for line in f]
         
     
     test_dataset.sort(key = lambda e: e['filename'])
-    if sub_start != 0 or sub_end != -1:  test_dataset = test_dataset[sub_start:sub_end]
+    if subset != None:  test_dataset = test_dataset[0:subset]
 
     total = len(test_dataset)
 
@@ -45,7 +48,16 @@ def extractAnnotatedTables(path, sub_start=0, sub_end=-1):
 
     return test_tables_grouped, total
 
-def test(pdf_paths, annotated_tables, draw=False, tol=5, only_bbox=False, find_method='rule-based'):
+def test(pdf_paths, annotated_tables, draw=False, tol=5, model=None):
+    # load model
+    model = YOLO('keremberke/yolov8s-table-extraction')
+
+    # set model parameters
+    model.overrides['conf'] = 0.25  # NMS confidence threshold
+    model.overrides['iou'] = 0.45  # NMS IoU threshold
+    model.overrides['agnostic_nms'] = False  # NMS class-agnostic
+    model.overrides['max_det'] = 1000  # maximum number of detections per image
+
     i = 0
     match_list = []
     mismatch_list = []
@@ -56,26 +68,13 @@ def test(pdf_paths, annotated_tables, draw=False, tol=5, only_bbox=False, find_m
         # Skip tables in one of both sets if they doesn't share the same filename
         if pdf_path != annotated_tables[i]['filename']:
             continue
-        
-        if only_bbox:
-            with pdfplumber.open(f"{dataset_path}/pdf/{pdf_path}") as pdf:
-                page = pdf.pages[0]
-                tableExtractor = TableFinder(page)
-                try:
-                    tables = tableExtractor.find_tables(left_threshold=10, right_threshold=5, bottom_threshold=9, top_threshold=4)
-                except Exception as e:
-                    print(e)
-                    print(pdf_path)
-                    continue
-        else:
-            try: 
-                tableExtractor = TableExtractor(path=f"{dataset_path}/pdf/{pdf_path}", separate_units=False, find_method=find_method)
-                tables = tableExtractor.extractTables(page_index=0) # all pdfs contain only one page
-                page = tableExtractor.pages[0]
-            except Exception as e:
-                print(e)
-                print(pdf_path)
-                continue
+
+        with pdfplumber.open(f"{dataset_path}/pdf/{pdf_path}") as pdf:
+            page = pdf.pages[0]
+            image = page.to_image(resolution=300)
+
+            # perform inference
+            tables = model.predict(image.original)[0].boxes
 
         # Check if there are any tables
         if len(tables) > 0 or len(annotated_tables[i]['tables']) > 0:
@@ -87,28 +86,24 @@ def test(pdf_paths, annotated_tables, draw=False, tol=5, only_bbox=False, find_m
                 bbox3 = bbox[3]
                 bbox[3] = page.height - bbox[1]
                 bbox[1] = page.height - bbox3
-
-            m = True
+            
+            e = []
             for t_i, table in enumerate(tables):
-                for test_table in test_tables:
-                    assert_horizontal = abs(table['bbox'][1] - test_table['bbox'][1]) < tol and abs(table['bbox'][3] - test_table['bbox'][3]) < tol
-                    assert_vertical = abs(table['bbox'][0] - test_table['bbox'][0]) < tol and abs(table['bbox'][2] - test_table['bbox'][2]) < tol
-                    assert_all = np.allclose(table['bbox'], test_table['bbox'], atol=tol)
-                    assert_except_bottom = abs(table['bbox'][1] - test_table['bbox'][1]) < tol and abs(table['bbox'][2] - test_table['bbox'][2]) < tol and abs(table['bbox'][0] - test_table['bbox'][0]) < tol
+                e.append([x/image.scale for x in table.xyxy.tolist()[0]])
 
-                    if assert_except_bottom:
+            for t_i, table in enumerate(e):
+                for test_table in test_tables:
+                    if np.allclose(table, test_table['bbox'], atol=tol):
                         match_list.append(f"\t{pdf_path} Table {t_i+1}")
                         break   
                 else:      
                     mismatch_list.append(f"\t{pdf_path} Table {t_i+1}")
-                    m = False
 
-            if draw and not m:
-                im = page.to_image(resolution=300)
+            if draw:
                 bboxs = [table['bbox'] for table in test_tables]
-                im.draw_rects(bboxs, stroke_width=0, fill=(230, 65, 67, 65)) # red for test tables
-                im.draw_rects([[x['bbox'][0], x['header'], x['bbox'][2], x['footer']] for x in tables], stroke_width=0)
-                im.save(f"img/{pdf_path.replace('/', '_')[0:-4]}.png")
+                image.draw_rects(bboxs, stroke_width=0, fill=(230, 65, 67, 65)) # red for test tables
+                image.draw_rects(e, stroke_width=0)
+                image.save(f"img/{pdf_path.replace('/', '_')[0:-4]}.png")
                 
             i+=1
 
@@ -136,11 +131,10 @@ if __name__ == '__main__':
     dataset_path = "fintabnet"
     pdf_paths = getPdfPaths(dataset_path + '/pdf')
 
-    sub_start = 0
-    sub_end = 1000
-    thread_number = 20
+    subset_number = 100
+    thread_number = 4
     
-    annotated_tables, total = extractAnnotatedTables(dataset_path + "/FinTabNet_1.0.0_table_test.jsonl", sub_start=sub_start, sub_end=sub_end)   
+    annotated_tables, total = extractAnnotatedTables(dataset_path + "/FinTabNet_1.0.0_table_test.jsonl", subset=subset_number)   
     batch_size = int(total/thread_number)
     pdf_paths.sort()
 
@@ -148,13 +142,14 @@ if __name__ == '__main__':
     thread = []
     total_matches = 0
 
-    #test(pdf_paths, annotated_tables, draw=False, tol=tol, only_bbox=True)
+    match_list, mismatch_list = test(pdf_paths, annotated_tables, draw=False, tol=tol)
+    total_matches = len(match_list)
 
-    with concurrent.futures.ProcessPoolExecutor() as executor:
-        matches = [executor.submit(test, pdf_paths, annotated_tables[i*batch_size:(i+1)*batch_size], tol=tol, draw=False, only_bbox=True, find_method='rule-based', model=None) for i in range(thread_number)]
-        for m in matches:
-            match_list, mismatch_list = m.result()
-            total_matches += len(match_list)
+    #with concurrent.futures.ProcessPoolExecutor(max_workers=thread_number) as executor:
+    #    matches = [executor.submit(test, pdf_paths, annotated_tables[i*batch_size:(i+1)*batch_size], tol=tol, draw=False) for i in range(thread_number)]
+    #    for m in matches:
+    #        match_list, mismatch_list = m.result()
+    #        total_matches += len(match_list)
 
     q.put(True)
 
@@ -163,4 +158,4 @@ if __name__ == '__main__':
     print(f"Matches: {total_matches}/{total}\t{total_matches/total*100} %")
 
     s1 = time.time()
-    print(f"{int((s1-s0) / 60)}:{int(s1-s0) % 60} minutes")
+    print(f"{int((s1-s0) / 60)}.{int(s1-s0) % 60} minutes")
