@@ -151,7 +151,7 @@ if __name__ == '__main__':
     #test(pdf_paths, annotated_tables, draw=False, tol=tol, only_bbox=True)
 
     with concurrent.futures.ProcessPoolExecutor() as executor:
-        matches = [executor.submit(test, pdf_paths, annotated_tables[i*batch_size:(i+1)*batch_size], tol=tol, draw=False, only_bbox=True, find_method='rule-based', model=None) for i in range(thread_number)]
+        matches = [executor.submit(test, pdf_paths, annotated_tables[i*batch_size:(i+1)*batch_size], tol=tol, draw=False, only_bbox=True, find_method='rule-based') for i in range(thread_number)]
         for m in matches:
             match_list, mismatch_list = m.result()
             total_matches += len(match_list)

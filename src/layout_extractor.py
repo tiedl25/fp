@@ -4,7 +4,10 @@ import copy
 if __name__ == "__main__":
     from table_finder import TableFinder
 else:
-    from .table_finder import TableFinder
+    try:
+        from .table_finder import TableFinder
+    except ImportError:
+        from table_finder import TableFinder
 
 
 class LayoutExtractor:
