@@ -320,6 +320,7 @@ class TableFinder:
                 diff.append(d)
 
         return statistics.mode(diff)
+        
     def find_tables(self, bottom_threshold=5, top_threshold=4, left_threshold=2, right_threshold=2):
         """
         Finds tables in the given document based on certain thresholds.

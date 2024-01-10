@@ -131,18 +131,23 @@ class TableExtractor:
             le = LayoutExtractor(table, table_clip, separate_units=self.separate_units)
             footnote_complete, _, _ = le.find_layout(5, 2, ['$', '%'])
 
+
+        # for both methods
+
         table_settings = le.find_cells()
-        plumber_table = table_clip.find_table(table_settings)
-        if plumber_table == None:
+        pdfplumber_table = table_clip.find_table(table_settings)
+
+        if pdfplumber_table == None:
             return None
 
         table['settings'] = table_settings
-        table['cells'] = plumber_table.cells
-        extracted_text = plumber_table.extract(x_tolerance=2)
+        table['cells'] = pdfplumber_table.cells
+
+        extracted_text = pdfplumber_table.extract(x_tolerance=2)
 
         # replace every \n with space in the text
         table['text'] = [
-            [s.replace('\n', ' ') for s in inner_list if s != None]
+            [s.replace('\n', ' ') for s in inner_list if s != None] # remove special symbols for testing purposes
             for inner_list in extracted_text
         ]
 
@@ -196,6 +201,7 @@ class TableExtractor:
         page = copy.copy(self.pages[page_index])
         tf = TableFinder(page)
 
+        image=None
         if img_path != None or self.find_method == 'model-based':
             image = page.to_image(resolution=300)
 
@@ -244,7 +250,7 @@ if __name__ == '__main__':
     model.overrides['agnostic_nms'] = False  # NMS class-agnostic
     model.overrides['max_det'] = 10  # maximum number of detections per image
 
-    te = TableExtractor(path="examples/pdf/FDX/2017/page_26.pdf", separate_units=False, find_method='model-based', model=model)
+    te = TableExtractor(path="fintabnet/pdf/ADS/2007/page_107.pdf", separate_units=False, find_method='model-based', model=model)
     tables = te.extractTables(page_index=0, img_path='table')
     
     dataframes = [te.tableToDataframe(table['text']) for table in tables]

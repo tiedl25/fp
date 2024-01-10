@@ -1,5 +1,6 @@
 import pdfplumber
 import copy
+import statistics
 
 if __name__ == "__main__":
     from table_finder import TableFinder
@@ -135,6 +136,21 @@ class LayoutExtractor:
         rows.append(rect) # to get the bottom and top separator
         self.row_separator = rows   
 
+    def determine_average_line_height(self):
+        chars = sorted(self.clipping.chars, key=lambda e: e['top'])
+
+        if len(chars) > 0 and chars[0]['text'] == " ":
+            chars.pop(0)
+
+        diff = []
+        for i in range(len(chars)-1):
+            if chars[i+1]['text'] == ' ':
+                continue
+            d = chars[i+1]['top'] - chars[i]['bottom']
+            if abs(d) > 0:
+                diff.append(abs(d))
+        return min(diff)
+
     def find_cells(self):
         vertical_lines = [self.table['bbox'][0], self.table['bbox'][2]] # left and right line
         horizontal_lines = [self.table['header'], self.table['footer']] # top and bottom line
@@ -160,6 +176,7 @@ class LayoutExtractor:
         return table_settings
 
     def find_layout(self, x_space, y_space, symbols):
+        #y_space = self.determine_average_line_height()
         footnote_complete, self.row_separator = self.find_rows(y_space)
 
         if not footnote_complete: return footnote_complete, None, None
