@@ -18,14 +18,14 @@ class LayoutExtractor:
         self.table_lines = sorted(self.table['lines'], key=lambda e: e['top'])
         self.separate_units = separate_units
 
-    def find_columns(self, max_diff, special_symbols):
+    def find_columns(self, clipping, max_diff, special_symbols):
         '''
             Define new column separator if the vertical distance between two characters is greater than max_diff or if the font changes.
             The headerline has often also another font, that creates problems with multiple column dividers where they not belong. 
             The font change is therefore only considered a column divider, if the distance to the next character is greater than 1.
             For special characters it also creates separate columns, defined by a rectangle.
         '''
-        chars = sorted(self.clipping.chars, key=lambda e: e['x0'])
+        chars = sorted(clipping.chars, key=lambda e: e['x0'])
         separator = []
 
         i=0
@@ -138,18 +138,14 @@ class LayoutExtractor:
 
     def determine_average_line_height(self):
         chars = sorted(self.clipping.chars, key=lambda e: e['top'])
-
-        if len(chars) > 0 and chars[0]['text'] == " ":
-            chars.pop(0)
+        chars = [char for char in chars if char['text'] != ' ']
 
         diff = []
         for i in range(len(chars)-1):
-            if chars[i+1]['text'] == ' ':
-                continue
             d = chars[i+1]['top'] - chars[i]['bottom']
-            if abs(d) > 0:
-                diff.append(abs(d))
-        return min(diff)
+            if d > 0:
+                diff.append(d)
+        return statistics.mode(diff)
 
     def find_cells(self):
         vertical_lines = [self.table['bbox'][0], self.table['bbox'][2]] # left and right line
@@ -181,22 +177,42 @@ class LayoutExtractor:
 
         if not footnote_complete: return footnote_complete, None, None
 
-        self.column_separator = self.find_columns(x_space, symbols)
+
+        # TODO add table top and bottom to table_lines
+        #i=0
+        #col_sep = []
+        #segments = self.table_lines.copy()
+        #segments.insert(0, {'top': self.table['header']})
+        #segments.append({'bottom': self.table['footer']})
+        #while i < len(segments)-1:
+        #    bbox = self.clipping.bbox.copy()
+        #    bbox[1] = segments[i]['top']
+        #    bbox[3] = segments[i+1]['bottom']
+        #    try: a = self.find_columns(self.clipping.crop(bbox), x_space, symbols)
+        #    except: 
+        #        i+=1
+        #        continue
+        #    col_sep.extend(a)
+#
+        #    i+=1
+#
+        #self.column_separator = col_sep
+
+
+        self.column_separator = self.find_columns(self.clipping, x_space, symbols)
 
         return footnote_complete, self.column_separator, self.row_separator
-    
-
 
 if __name__ == '__main__':
-    path = "examples/pdf/FDX/2017/page_36.pdf"
+    path = "examples/pdf/FDX/2017/page_27.pdf"
 
     with pdfplumber.open(path) as pdf:
         page = pdf.pages[0]
         t_finder = TableFinder(page)
         tables = t_finder.find_tables()
-        table_clip = page.crop(tables[1]['bbox'])
+        table_clip = page.crop(tables[0]['bbox'])
 
-    le = LayoutExtractor(tables[1], table_clip)
+    le = LayoutExtractor(tables[0], table_clip)
     footnote_complete, column_separator, row_separator = le.find_layout(5, 2, ['$', '%'])
         
     im = table_clip.to_image(resolution=300)

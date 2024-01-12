@@ -389,6 +389,10 @@ class TableFinder:
 
             self.tables = derived_tables
         
+        for t in derived_tables:
+            t['lines'] = [x for x in t['lines'] if (x['x0']>=t['bbox'][0] and x['x1']<=t['bbox'][2] and
+                                                    x['top']>=t['bbox'][1] and x['bottom']<=t['bbox'][3])] # TODO Assure lines lie completely in table bbox
+
         return derived_tables
     
 if __name__ == '__main__':

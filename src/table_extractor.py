@@ -242,16 +242,18 @@ class TableExtractor:
 
 if __name__ == '__main__':  
     # load model
-    model = YOLO('keremberke/yolov8s-table-extraction')
+    #model = YOLO('keremberke/yolov8s-table-extraction')
+#
+    ## set model parameters
+    #model.overrides['conf'] = 0.25  # NMS confidence threshold
+    #model.overrides['iou'] = 0.45  # NMS IoU threshold
+    #model.overrides['agnostic_nms'] = False  # NMS class-agnostic
+    #model.overrides['max_det'] = 10  # maximum number of detections per image
 
-    # set model parameters
-    model.overrides['conf'] = 0.25  # NMS confidence threshold
-    model.overrides['iou'] = 0.45  # NMS IoU threshold
-    model.overrides['agnostic_nms'] = False  # NMS class-agnostic
-    model.overrides['max_det'] = 10  # maximum number of detections per image
+    model=None
 
-    te = TableExtractor(path="fintabnet/pdf/ADS/2007/page_107.pdf", separate_units=False, find_method='model-based', model=model)
+    te = TableExtractor(path="fintabnet/pdf/ADS/2007/page_107.pdf", separate_units=False, find_method='rule-based', model=model)
     tables = te.extractTables(page_index=0, img_path='table')
     
-    dataframes = [te.tableToDataframe(table['text']) for table in tables]
-    for i, df in enumerate(dataframes): te.export('excel', f'excel/test_{i}', dataframe=df)
+    #dataframes = [te.tableToDataframe(table['text']) for table in tables]
+    #for i, df in enumerate(dataframes): te.export('excel', f'excel/test_{i}', dataframe=df)
