@@ -1,6 +1,7 @@
 import pandas as pd
 import pdfplumber
 import copy
+import statistics
 from ultralyticsplus import YOLO, render_result
 
 if __name__ == '__main__':  
@@ -11,13 +12,15 @@ else:
     from .layout_extractor import LayoutExtractor
 
 class TableExtractor:
-    def __init__(self, path, separate_units=False, find_method='rule-based', model=None):
+    def __init__(self, path, separate_units=False, find_method='rule-based', model=None, max_column_space=5, max_row_space=2):
         self.path = path
         pdf = pdfplumber.open(path)
         self.pages = pdf.pages
         self.separate_units = separate_units
         self.find_method = find_method
         self.model = model
+        self.max_columns_space = max_column_space
+        self.max_row_space = max_row_space
 
     def tableToDataframe(self, table):
         """
@@ -71,6 +74,38 @@ class TableExtractor:
         elif format == 'csv':
             return dataframe.to_latex(f'{path}.csv', index=False)      
 
+    def shrink_cell(self, page, cell):
+        """
+        Calculate the coordinates of the smallest bounding box that contains all non-empty characters within a given cell on a page.
+
+        Parameters:
+            page (Page): The page object containing the cell.
+            cell (tuple): The coordinates of the cell in the format (x0, y0, x1, y1).
+
+        Returns:
+            list: The coordinates of the smallest bounding box in the format [x0, y0, x1, y1].
+        """
+        pagecrop = [x for x in page.crop(cell).chars if x['text'] not in [' ', '.']] # remove white spaces and dots because they should not be part of the cell
+
+        b1 = min(pagecrop, key=lambda e: e['x0'], default={'x0': cell[0]})
+        b2 = min(pagecrop, key=lambda e: e['top'], default={'top': cell[1]})
+        b3 = max(pagecrop, key=lambda e: e['x1'], default={'x1': cell[2]})
+        b4 = max(pagecrop, key=lambda e: e['bottom'], default={'bottom': cell[3]})
+
+        return [b1['x0'], b2['top'], b3['x1'], b4['bottom']]
+
+    def determine_average_line_height(self, page):
+        chars = sorted(page.chars, key=lambda e: e['top'])
+        chars = [char for char in chars if char['text'] != ' ']
+
+        diff = []
+        for i in range(len(chars)-1):
+            d = chars[i+1]['top'] - chars[i]['bottom']
+            if d > 0:
+                diff.append(d)
+        print(statistics.mode(diff))
+        return statistics.mode(diff)-0.2
+
     def extractTable(self, page, table_index=0, table=None, img_path=None, image=None):
         """
         Extracts a table from a given page. Either by rule-based or custom method based on pdfplumbers table extraction.
@@ -105,9 +140,9 @@ class TableExtractor:
                         return None
                     table = tables[table_index]
 
-                table_clip = page.crop(table['bbox'])
-                le = LayoutExtractor(table, table_clip, separate_units=self.separate_units)
-                footnote_complete, _, _ = le.find_layout(5, 2, ['$', '%'])
+                page_crop = page.crop(table['bbox'])
+                le = LayoutExtractor(table, page_crop, separate_units=self.separate_units)
+                footnote_complete, _, _ = le.find_layout(self.max_columns_space, self.max_row_space, ['$', '%'])
 
                 threshold += 5
 
@@ -120,70 +155,51 @@ class TableExtractor:
             if table == None:
                 page = copy.copy(self.pages[0])
 
-                tables = self.yolov_extractTables(image)
+                tf = TableFinder(page, model=self.model)
+                tables = tf.find_tables(find_method=self.find_method, image=image if image is not None else page.to_image(resolution=300))
 
                 if table_index >= len(tables):
                     return None
                 table = tables[table_index]
             
-            table_clip = page.crop(table['bbox'])
+            page_crop = page.crop(table['bbox'])
 
-            le = LayoutExtractor(table, table_clip, separate_units=self.separate_units)
-            footnote_complete, _, _ = le.find_layout(5, 2, ['$', '%'])
+            le = LayoutExtractor(table, page_crop, separate_units=self.separate_units)
+            # TODO average line height
+            le.find_layout(self.max_columns_space, self.determine_average_line_height(page), ['$', '%'], ignore_footnote=True)
 
 
         # for both methods
 
-        table_settings = le.find_cells()
-        pdfplumber_table = table_clip.find_table(table_settings)
+        table['settings'] = le.get_table_settings()
+        pdfplumber_table = page_crop.find_table(table['settings'])
 
         if pdfplumber_table == None:
             return None
 
-        table['settings'] = table_settings
-        table['cells'] = pdfplumber_table.cells
+        table_cells = []
+        for cell in pdfplumber_table.cells: 
+            bbox = self.shrink_cell(page, cell)
+            try: 
+                text = page_crop.crop(bbox).extract_text().replace('\n', ' ')
+                if text == '':
+                    continue
+                table_cells.append({'bbox': bbox, 'text': text})
+            except: continue
 
-        extracted_text = pdfplumber_table.extract(x_tolerance=2)
+        # reformatted cells
+        table['cells'] = table_cells
 
-        # replace every \n with space in the text
-        table['text'] = [
-            [s.replace('\n', ' ') for s in inner_list if s != None] # remove special symbols for testing purposes
-            for inner_list in extracted_text
-        ]
+        # original cells
+        table['pdfplumber_cells'] = {'cells': pdfplumber_table.cells, 'text': pdfplumber_table.extract(x_tolerance=2)}
 
         if img_path != None:
-            im = table_clip.to_image(resolution=300)
+            im = page_crop.to_image(resolution=300)
             im.draw_lines(table['lines'], stroke_width=3, stroke=(0,0,0)) # redraw existing lines
             im.debug_tablefinder(table_settings)
-            im.save(img_path)
+            im.save(f'{img_path}.png')
 
         return table
-
-    def yolov_extractTables(self, image):
-        """
-        Extracts tables from the given image, by using the yolov8s machine learning model.
-
-        Parameters:
-            image (Image): The image object from which the tables are to be extracted.
-
-        Returns:
-            list: A list of dictionaries representing the extracted tables. Each dictionary contains the following keys:
-                - 'bbox': A list of four values representing the bounding box coordinates of the table.
-                - 'lines': An empty list to store the lines of the table.
-                - 'settings': An empty dictionary to store the settings of the table.
-                - 'cells': An empty list to store the cells of the table.
-                - 'footer': The y-coordinate of the table's footer.
-                - 'header': The y-coordinate of the table's header.
-        """
-        table_boxes = self.model.predict(image.original)[0].boxes
-
-        tables = []
-        for t_i, table in enumerate(table_boxes):
-            tables.append({'bbox': [x/image.scale for x in table.xyxy.tolist()[0]], 'lines': [], 'settings': {}, 'cells': []})
-            tables[t_i]['footer'] = tables[t_i]['bbox'][3]
-            tables[t_i]['header'] = tables[t_i]['bbox'][1]
-
-        return tables
 
     def extractTablesInPage(self, page_index, img_path=None):
         """
@@ -198,23 +214,29 @@ class TableExtractor:
         """
         extracted_tables = []
 
-        page = copy.copy(self.pages[page_index])
-        tf = TableFinder(page)
+        page = self.pages.copy()[page_index]
+        tf = TableFinder(page, model=self.model)
 
         image=None
-        if img_path != None or self.find_method == 'model-based':
+        if img_path is not None or self.find_method == 'model-based':
             image = page.to_image(resolution=300)
 
-        if self.find_method == 'rule-based': tables_found = tf.find_tables()
-        else: tables_found = self.yolov_extractTables(image)
+        tables_found = tf.find_tables(find_method=self.find_method, image=image)
 
         for table_index, tablebox in enumerate(tables_found):
             table = self.extractTable(page, table_index=table_index, table=tablebox, image=image)
-            if table != None: 
-                extracted_tables.append(table)
-                if img_path != None:
-                    image.draw_lines(table['lines'], stroke_width=3, stroke=(0,0,0)) # redraw existing lines
-                    image.debug_tablefinder(table['settings'])
+            if table is None: 
+                continue
+
+            extracted_tables.append(table)
+            if img_path is None:
+                continue
+
+            image.draw_lines(table['lines'], stroke_width=3, stroke=(0,0,0)) # redraw existing lines
+            #image.debug_tablefinder(table['settings'])
+            image.draw_rect(table['bbox'])
+            image.draw_rects(x['bbox'] for x in table['cells'])
+            image.draw_hline(table['header'])
         
         if img_path != None: image.save(f'{img_path}_{page_index}.png')
         
@@ -241,19 +263,22 @@ class TableExtractor:
         return extracted_tables
 
 if __name__ == '__main__':  
-    # load model
-    #model = YOLO('keremberke/yolov8s-table-extraction')
-#
-    ## set model parameters
-    #model.overrides['conf'] = 0.25  # NMS confidence threshold
-    #model.overrides['iou'] = 0.45  # NMS IoU threshold
-    #model.overrides['agnostic_nms'] = False  # NMS class-agnostic
-    #model.overrides['max_det'] = 10  # maximum number of detections per image
+    find_method = 'model-based'
 
-    model=None
+    if find_method == 'model-based':
+        # load model
+        model = YOLO('keremberke/yolov8s-table-extraction')
 
-    te = TableExtractor(path="fintabnet/pdf/ADS/2007/page_107.pdf", separate_units=False, find_method='rule-based', model=model)
-    tables = te.extractTables(page_index=0, img_path='table')
+        # set model parameters
+        model.overrides['conf'] = 0.25  # NMS confidence threshold
+        model.overrides['iou'] = 0.45  # NMS IoU threshold
+        model.overrides['agnostic_nms'] = False  # NMS class-agnostic
+        model.overrides['max_det'] = 10  # maximum number of detections per image
+    else :
+        model = None    
+
+    te = TableExtractor(path="fintabnet/pdf/ADS/2015/page_115.pdf", separate_units=False, find_method=find_method, model=model)
+    tables = te.extractTables(img_path='table')
     
     #dataframes = [te.tableToDataframe(table['text']) for table in tables]
     #for i, df in enumerate(dataframes): te.export('excel', f'excel/test_{i}', dataframe=df)

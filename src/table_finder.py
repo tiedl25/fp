@@ -2,10 +2,11 @@ import pdfplumber
 import statistics
 
 class TableFinder:
-    def __init__(self, page) -> None:
+    def __init__(self, page, model=None) -> None:
         self.page = page
         self.lines = page.lines
         self.tables = []
+        self.model = model
 
     def find_table_top(self, bbox, max_diff, must_contain_chars=False):
         """
@@ -308,6 +309,7 @@ class TableFinder:
 
         return bbox
 
+    # TODO IMPROVE THIS
     def determine_average_line_height(self):
         chars = sorted(self.page.chars, key=lambda e: e['bottom'])
 
@@ -321,7 +323,7 @@ class TableFinder:
 
         return statistics.mode(diff)
         
-    def find_tables(self, bottom_threshold=5, top_threshold=4, left_threshold=2, right_threshold=2):
+    def find_tables(self, bottom_threshold=5, top_threshold=4, left_threshold=2, right_threshold=2, find_method='rule-based', image=None):
         """
         Finds tables in the given document based on certain thresholds.
         
@@ -335,66 +337,79 @@ class TableFinder:
             list: A list of derived tables found in the document.
         """
 
-        bottom_threshold = self.determine_average_line_height()
-
         self.lines = [x for x in self.lines if x['x0'] != x['x1']] # remove vertical lines
         self.lines.extend(self.collapse_rects())
         self.lines.sort(key = lambda e: e['top'])
         self.lines = self.concat_lines(self.lines)
-        for i, line in enumerate(self.lines):
-            if line['x0'] >= line['x1']:
-                continue
-            
-            bottom = self.find_table_bottom([line['x0'], line['top'], line['x1'], self.page.bbox[3]], bottom_threshold)
-            top = self.find_table_top([line['x0'], self.page.bbox[1], line['x1'], line['bottom']], top_threshold)
 
-            if top >= bottom:
-                continue
+        if find_method == 'rule-based':
+            bottom_threshold = self.determine_average_line_height()
+            for i, line in enumerate(self.lines):
+                if line['x0'] >= line['x1']:
+                    continue
                 
-            left = self.find_table_left([self.page.bbox[0], top, line['x0'], bottom], left_threshold)
-            right = self.find_table_right([line['x1'], top, self.page.bbox[2], bottom], right_threshold)
+                bottom = self.find_table_bottom([line['x0'], line['top'], line['x1'], self.page.bbox[3]], bottom_threshold)
+                top = self.find_table_top([line['x0'], self.page.bbox[1], line['x1'], line['bottom']], top_threshold)
 
-            mid = self.page.width/2
-            objs = self.page.crop([mid-5, top, mid+5, bottom])
-            objs = objs.chars + objs.lines
-            if len(objs) > 0:#not ((mid-5 < left and mid-5 < right) or (mid+5 > left and mid+5 > right)):
-                left = self.page.bbox[0]#self.find_table_left([self.page.bbox[0], top, left, bottom], 50)
+                if top >= bottom:
+                    continue
+                    
+                left = self.find_table_left([self.page.bbox[0], top, line['x0'], bottom], left_threshold)
+                right = self.find_table_right([line['x1'], top, self.page.bbox[2], bottom], right_threshold)
 
-            bbox = [left, top, right, bottom]
+                mid = self.page.width/2
+                objs = self.page.crop([mid-5, top, mid+5, bottom])
+                objs = objs.chars + objs.lines
+                if len(objs) > 0:#not ((mid-5 < left and mid-5 < right) or (mid+5 > left and mid+5 > right)):
+                    left = self.page.bbox[0]#self.find_table_left([self.page.bbox[0], top, left, bottom], 50)
 
-            bbox = self.extend_table(bbox)
+                bbox = [left, top, right, bottom]
 
-            if len(objs) > 0: bbox[0] = self.find_table_left(bbox, 200)
+                bbox = self.extend_table(bbox)
 
-            table = {'bbox': bbox, 'lines': [line]}
+                if len(objs) > 0: bbox[0] = self.find_table_left(bbox, 200)
 
-            self.tables.append(table)
+                table = {'bbox': bbox, 'lines': [line]}
 
-        #return self.tables
-        derived_tables = []
-        if (len(self.tables)>0):
-            while True:
-                new_table = self.derive_tables()
-                new_table['footer'] = new_table['bbox'][3]
-                new_table['header'] = new_table['bbox'][1]
-                derived_tables.append(new_table)
-                if len(self.tables) == 0:
-                    break
-                if len(self.tables) == 1:
-                    new_table = self.tables.pop(0)
+                self.tables.append(table)
+
+            #return self.tables
+            derived_tables = []
+            if (len(self.tables)>0):
+                while True:
+                    new_table = self.derive_tables()
                     new_table['footer'] = new_table['bbox'][3]
                     new_table['header'] = new_table['bbox'][1]
                     derived_tables.append(new_table)
-                    break
+                    if len(self.tables) == 0:
+                        break
+                    if len(self.tables) == 1:
+                        new_table = self.tables.pop(0)
+                        new_table['footer'] = new_table['bbox'][3]
+                        new_table['header'] = new_table['bbox'][1]
+                        derived_tables.append(new_table)
+                        break
 
-            self.tables = derived_tables
-        
+                self.tables = derived_tables
+        elif find_method == 'model-based' and self.model is not None and image is not None:
+            table_boxes = self.model.predict(image.original)[0].boxes
+
+            derived_tables = []
+            for t_i, table in enumerate(table_boxes):
+                bbox = self.extend_table(top_threshold=2, bottom_threshold=2, bbox=[x/image.scale for x in table.xyxy.tolist()[0]]) # apply image scale and extend bbox
+                derived_tables.append({'bbox': bbox, 'lines': self.lines, 'settings': {}, 'cells': []})
+                derived_tables[t_i]['footer'] = derived_tables[t_i]['bbox'][3]
+                derived_tables[t_i]['header'] = derived_tables[t_i]['bbox'][1]        
+            
+
+
+        # Make sure that all the lines are within the table
         for t in derived_tables:
-            t['lines'] = [x for x in t['lines'] if (x['x0']>=t['bbox'][0] and x['x1']<=t['bbox'][2] and
-                                                    x['top']>=t['bbox'][1] and x['bottom']<=t['bbox'][3])] # TODO Assure lines lie completely in table bbox
+            t['lines'] = [x for x in t['lines'] if (x['x0']>=t['bbox'][0]-2 and x['x1']<=t['bbox'][2]+2 and
+                                                    x['top']>=t['bbox'][1]-2 and x['bottom']<=t['bbox'][3]+2)]
 
         return derived_tables
-    
+
 if __name__ == '__main__':
     tables = []
 

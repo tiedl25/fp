@@ -4,6 +4,7 @@ from src.table_extractor import TableExtractor
 from src.table_finder import TableFinder
 
 from ultralyticsplus import YOLO, render_result
+from difflib import SequenceMatcher
 
 
 import numpy as np
@@ -47,18 +48,27 @@ def extractAnnotatedTables(path, sub_start=0, sub_end=-1):
 
     return test_tables_grouped, total
 
-def shrink_cell(page, cell):
-    pagecrop = [x for x in page.crop(cell).chars if x['text'] != ' ']
+def compare_cells(table, test_table, pdf_path, t_i, page):
+    #if abs(len(table['cells']) - len(test_table['cells'])) < 10:
+    #    return f"\t\t{pdf_path} Table {t_i+1}"
+#
+    #return None
 
-    b1 = min(pagecrop, key=lambda e: e['x0'], default={'x0': cell[0]})
-    b2 = min(pagecrop, key=lambda e: e['top'], default={'top': cell[1]})
-    b3 = max(pagecrop, key=lambda e: e['x1'], default={'x1': cell[2]})
-    b4 = max(pagecrop, key=lambda e: e['bottom'], default={'bottom': cell[3]})
+    #first_set = set([x['text'] for x in table['cells']])
+    #sec_set = set([x['text'] for x in test_table['cells']])
+#
+    ## Get the differences between two sets
+    #differences = (first_set - sec_set).union(sec_set - first_set)
 
-    return [b1['x0'], b2['top'], b3['x1'], b4['bottom']]
+    matches = 0
+    for cell in table['cells']:
+        for test_cell in test_table['cells']:
+            s = SequenceMatcher(None, test_cell['text'], cell['text'])
+            if s.ratio() > 0.5:
+                matches += 1
+                break
 
-def compare_cells_by_bbox(table, test_table, pdf_path, t_i, page):
-    if abs(len(table['cells']) - len(test_table['cells'])) < 20:
+    if matches > len(test_table['cells']) - 20:
         return f"\t\t{pdf_path} Table {t_i+1}"
 
     return None
@@ -99,7 +109,7 @@ def test(pdf_paths, annotated_tables, draw=False, tol=5, only_bbox=False, find_m
                     continue
         else:
             try: 
-                tableExtractor = TableExtractor(path=f"{dataset_path}/pdf/{pdf_path}", separate_units=False, find_method=find_method, model=model)
+                tableExtractor = TableExtractor(path=f"{dataset_path}/pdf/{pdf_path}", separate_units=False, find_method=find_method, model=model, max_column_space=5, max_row_space=2)
                 tables = tableExtractor.extractTables(page_index=0) # all pdfs contain only one page
                 page = tableExtractor.pages[0]
             except Exception as e:
@@ -119,32 +129,19 @@ def test(pdf_paths, annotated_tables, draw=False, tol=5, only_bbox=False, find_m
             bbox3 = bbox[3]
             bbox[3] = page.height - bbox[1]
             bbox[1] = page.height - bbox3
-
             test_table['bbox'] = bbox
 
-            bboxs = []
-            text = []
-
+            test_table_cells = []
             for cell in test_table['cells']:
-                if cell['tokens'] != []:
-                    bboxs.append([cell['bbox'][0], page.height-cell['bbox'][3], cell['bbox'][2], page.height-cell['bbox'][1]])
-                    text.append(''.join(cell['tokens']))
-            
-            test_table['cells'] = bboxs
-            test_table['text'] = text
-        
-        # shrink cells of pdfplumber tables to smallest bounding box
-        for table in tables:
-            table_cells = []
-            for x in table['cells']: 
-                cell = shrink_cell(page, x)
-                if x == cell:
+                if cell['tokens'] == []:
                     continue
-                table_cells.append(cell)
-
-            table['cells'] = table_cells
+                bbox = [cell['bbox'][0], page.height-cell['bbox'][3], cell['bbox'][2], page.height-cell['bbox'][1]]
+                text = page.crop(cell['bbox']).extract_text().replace('\n', ' ')
+                test_table_cells.append({'bbox': bbox, 'text': text})
+            test_table['cells'] = test_table_cells
 
         match = True
+        cell_match = True
         for t_i, table in enumerate(tables):
             for test_table in test_tables:
                 # different criteria for matching
@@ -156,23 +153,28 @@ def test(pdf_paths, annotated_tables, draw=False, tol=5, only_bbox=False, find_m
                 if assert_all:
                     match_list.append(f"\t{pdf_path} Table {t_i+1}")
                     if not only_bbox:
-                        tmp = compare_cells_by_bbox(table, test_table, pdf_path, t_i, page)
+                        tmp = compare_cells(table, test_table, pdf_path, t_i, page)
                         if tmp != None: cell_match_list.append(tmp)
+                        else: cell_match = False
                     break   
             else:      
                 mismatch_list.append(f"\t{pdf_path} Table {t_i+1}")
                 match = False
+        
+        if len(tables) == 0 and len(test_tables) > 0:
+            match = False
+            cell_match = False
 
-        if draw and not match:
+        if draw and match and not cell_match:
             im = page.to_image(resolution=300)
             im2 = page.to_image(resolution=300)
             for table in test_tables:
                 im.draw_rect(table['bbox'], stroke_width=0, fill=(230, 65, 67, 65)) # red for test tables
-                im.draw_rects(test_table['cells'], stroke_width=0, fill=(230, 65, 67, 65))
+                im.draw_rects([x['bbox'] for x in test_table['cells']], stroke_width=0, fill=(230, 65, 67, 65))
 
             for table in tables: 
-                im2.draw_rect([table['bbox'][0], table['header'], table['bbox'][2], table['footer']], stroke_width=0)
-                im2.draw_rects(table['cells'])
+                im2.draw_rect(table['bbox'], stroke_width=0) # [table['bbox'][0], table['header'], table['bbox'][2], table['footer']], stroke_width=0)
+                im2.draw_rects([x['bbox'] for x in table['cells']])
 
             im.save(f"img/{pdf_path.replace('/', '_')[0:-4]}_test.png")
             im2.save(f"img/{pdf_path.replace('/', '_')[0:-4]}.png")
@@ -180,7 +182,6 @@ def test(pdf_paths, annotated_tables, draw=False, tol=5, only_bbox=False, find_m
         i+=1
 
     return match_list, mismatch_list, cell_match_list
-
 
 def loading_sequence(queue):
     symbols = ['-', '\\', '|', '/']
@@ -203,8 +204,8 @@ if __name__ == '__main__':
     dataset_path = "fintabnet"
     pdf_paths = getPdfPaths(dataset_path + '/pdf')
 
-    sub_start = 0
-    sub_end = 50
+    sub_start = 100
+    sub_end = 200
     thread_number = 1
     
     annotated_tables, total = extractAnnotatedTables(dataset_path + "/FinTabNet_1.0.0_table_test.jsonl", sub_start=sub_start, sub_end=sub_end)   
@@ -233,5 +234,7 @@ if __name__ == '__main__':
     print(f"Matches: {total_matches}/{total}\t{total_matches/total*100} %")
     print(f"Cell Matches: {total_cell_matches}/{total_matches}\t{total_cell_matches/total_matches*100} %")
 
+    print(cell_match_list, sep='\n')
+
     s1 = time.time()
-    print(f"{int((s1-s0) / 60)}.{int(s1-s0) % 60} minutes")
+    print(f"{int((s1-s0) / 60)}:{int(s1-s0) % 60} minutes")

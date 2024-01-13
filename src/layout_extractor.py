@@ -26,28 +26,22 @@ class LayoutExtractor:
             For special characters it also creates separate columns, defined by a rectangle.
         '''
         chars = sorted(clipping.chars, key=lambda e: e['x0'])
+        chars = [char for char in chars if char['text'] != ' ']
         separator = []
 
-        i=0
-        while i < len(chars)-1:
+        for i in range(len(chars)-1):
             char = chars[i+1]
+            diff = char['x0'] - chars[i]['x1']
 
-            if char['text'] == ' ':
-                chars.pop(i+1) # remove white spaces
-            else:
-                diff = char['x0'] - chars[i]['x1']
+            if diff > max_diff or (diff > 3 and char['fontname'] != chars[i]['fontname']):
+                top, bottom = clipping.bbox[1], clipping.bbox[3]
+                separator.append({'x0': char['x0']-1, 'top': top, 'x1': char['x0']-1, 'bottom': bottom, 'object_type': 'line', 'height': bottom-top})
 
-                if diff > max_diff or (diff > 1 and char['fontname'] != chars[i]['fontname']):
-                    top, bottom = self.table['bbox'][1], self.table['footer']
-                    separator.append({'x0': char['x0'], 'top': top, 'x1': char['x0'], 'bottom': bottom, 'object_type': 'line', 'height': bottom-top})
-
-                # special characters can be defined such as $ or % that are treated as separate columns
-                if self.separate_units and (chars[0]['text'] in special_symbols or char['text'] in special_symbols):
-                    rect = self.find_unit_column(char)
-                    self.separate_unit_column(rect)
-                    separator.append(rect)
-
-                i+=1
+            # special characters can be defined such as $ or % that are treated as separate columns
+            if self.separate_units and (chars[0]['text'] in special_symbols or char['text'] in special_symbols):
+                rect = self.find_unit_column(char)
+                self.separate_unit_column(rect)
+                separator.append(rect)
 
         return separator
 
@@ -57,37 +51,35 @@ class LayoutExtractor:
             Also detect, if a footnote exists and thus separate it from the rest of the table.
         '''
         chars = sorted(self.clipping.chars, key=lambda e: e['top'])
+        chars = [char for char in chars if char['text'] != ' ']
         separator = []
         footnote_complete = None
         footnote_separator = []
+        header_separator = None
 
-        if len(chars) > 0 and chars[0]['text'] == " ":
-            chars.pop(0)
+        for i in range(len(chars)-1):
+            diff = chars[i+1]['top'] - chars[i]['bottom']
+            avg = (chars[i]['bottom'] + chars[i+1]['top']) / 2
 
-        i=0
-        while i < len(chars)-1:
-            if chars[i+1]['text'] == " ":
-                chars.pop(i+1) # remove white spaces
-            else:
-                diff = chars[i+1]['top'] - chars[i]['bottom']
-                if diff > max_diff:
-                    avg = (chars[i]['bottom'] + chars[i+1]['top']) / 2
-                    left = self.table['bbox'][0]
-                    right = self.table['bbox'][2]
-                    line = {'x0': left, 'top': avg, 'x1': right, 'bottom': avg, 'object_type': 'line', 'width': right-left}
-                    footnote_separator.append(line) if footnote_complete else separator.append(line)
+            if diff >= max_diff:
+                left = self.table['bbox'][0]
+                right = self.table['bbox'][2]
+                line = {'x0': left, 'top': avg, 'x1': right, 'bottom': avg, 'object_type': 'line', 'width': right-left}
+                footnote_separator.append(line) if footnote_complete else separator.append(line)
 
-                # separate footer
-                if chars[i+1]['size'] != chars[i]['size']:
-                    if diff < 0: # footnote index as superscript
-                        self.table['footer'] = self.table['bbox'][3]
-                    else: # probably actual footnote
-                        self.table['footer'] = chars[i]['bottom']
-                        separator.extend(footnote_separator)
-                    footnote_complete = not footnote_complete
-                
-                i+=1
+            # separate header if font changes for the first time
+            if chars[i+1]['fontname'] != chars[i]['fontname'] and header_separator is None:
+                header_separator = avg if diff > 0 else chars[i]['top']-1
 
+            # separate footer
+            #if chars[i+1]['size'] != chars[i]['size']:
+            #    if diff < 0: # footnote index as superscript
+            #        self.table['footer'] = self.table['bbox'][3]
+            #    else: # probably actual footnote
+            #        self.table['footer'] = chars[i]['bottom']
+            #        separator.extend(footnote_separator)
+            #    footnote_complete = not footnote_complete
+            
         if footnote_complete == None: 
             separator.extend(footnote_separator)
             footnote_complete = True
@@ -96,7 +88,7 @@ class LayoutExtractor:
         bbox[3] = self.table['footer']
         self.clipping = self.clipping.crop(bbox)
 
-        return footnote_complete, separator
+        return footnote_complete, separator, header_separator if header_separator is not None else self.table['bbox'][1]
     
     def find_unit_column(self, char):
         '''
@@ -136,20 +128,9 @@ class LayoutExtractor:
         rows.append(rect) # to get the bottom and top separator
         self.row_separator = rows   
 
-    def determine_average_line_height(self):
-        chars = sorted(self.clipping.chars, key=lambda e: e['top'])
-        chars = [char for char in chars if char['text'] != ' ']
-
-        diff = []
-        for i in range(len(chars)-1):
-            d = chars[i+1]['top'] - chars[i]['bottom']
-            if d > 0:
-                diff.append(d)
-        return statistics.mode(diff)
-
-    def find_cells(self):
+    def get_table_settings(self):
         vertical_lines = [self.table['bbox'][0], self.table['bbox'][2]] # left and right line
-        horizontal_lines = [self.table['header'], self.table['footer']] # top and bottom line
+        horizontal_lines = [self.table['bbox'][1], self.table['footer']] # top and bottom line
         #horizontal_lines.extend(self.table['lines'])
         if "column_separator" in vars(self).keys():
             vertical_lines.extend(self.column_separator)
@@ -171,35 +152,33 @@ class LayoutExtractor:
 
         return table_settings
 
-    def find_layout(self, x_space, y_space, symbols):
-        #y_space = self.determine_average_line_height()
-        footnote_complete, self.row_separator = self.find_rows(y_space)
+    def find_layout(self, x_space, y_space, symbols, ignore_footnote=False):
+        footnote_complete, self.row_separator, self.table['header'] = self.find_rows(y_space)
 
-        if not footnote_complete: return footnote_complete, None, None
+        if not footnote_complete and not ignore_footnote: return footnote_complete, None, None
 
+        i=0
+        col_sep = []
+        segments = [{'top': self.table['bbox'][1]}]
+        segments.extend(self.table_lines.copy() if self.table['header'] == self.table['bbox'][1] else [x for x in self.table_lines.copy() if x['top'] < self.table['header']])
+        segments.extend([{'top': self.table['header'], 'bottom': self.table['header']}, {'bottom': self.table['footer']}])
 
-        # TODO add table top and bottom to table_lines
-        #i=0
-        #col_sep = []
-        #segments = self.table_lines.copy()
-        #segments.insert(0, {'top': self.table['header']})
-        #segments.append({'bottom': self.table['footer']})
-        #while i < len(segments)-1:
-        #    bbox = self.clipping.bbox.copy()
-        #    bbox[1] = segments[i]['top']
-        #    bbox[3] = segments[i+1]['bottom']
-        #    try: a = self.find_columns(self.clipping.crop(bbox), x_space, symbols)
-        #    except: 
-        #        i+=1
-        #        continue
-        #    col_sep.extend(a)
-#
-        #    i+=1
-#
-        #self.column_separator = col_sep
+        while i < len(segments)-1:
+            bbox = self.clipping.bbox.copy()
+            bbox[1] = segments[i]['top']
+            bbox[3] = segments[i+1]['bottom']
+            try: a = self.find_columns(self.clipping.crop(bbox), x_space, symbols)
+            except: 
+                i+=1
+                continue
+            col_sep.extend(a)
+
+            i+=1
+
+        self.column_separator = col_sep
 
 
-        self.column_separator = self.find_columns(self.clipping, x_space, symbols)
+        #self.column_separator = self.find_columns(self.clipping, x_space, symbols)
 
         return footnote_complete, self.column_separator, self.row_separator
 
@@ -218,7 +197,7 @@ if __name__ == '__main__':
     im = table_clip.to_image(resolution=300)
     #im.draw_lines(tables[0]['lines'], stroke_width=3, stroke=(0,0,0))
 
-    table_settings = le.find_cells()
+    table_settings = le.get_table_settings()
 
     im.debug_tablefinder(table_settings)
     

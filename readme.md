@@ -39,6 +39,15 @@ The approach I now use, when I find a change in size I also check if the y-dista
 
 <img src="assets/separate_footnote.png" width="300" />
 
+#### Table Object
+Dictionary:
+    bbox: 
+    header: 
+    footer:
+    cells: cells extracted with pdfplumber, shrinked and formated as {bbox: , text:} dictionary pair
+    pdfplumber_cells: dictionary containing cells extracted with pdfplumber and the corresponding text
+    settings: settings for pdfplumber table extraction
+
 ### Problems
 + Not every table in the pdfs is given in the annotated json file
 + Some tables don't consist of any line
