@@ -109,7 +109,7 @@ def test(pdf_paths, annotated_tables, draw=False, tol=5, only_bbox=False, find_m
                     continue
         else:
             try: 
-                tableExtractor = TableExtractor(path=f"{dataset_path}/pdf/{pdf_path}", separate_units=False, find_method=find_method, model=model, max_column_space=5, max_row_space=2)
+                tableExtractor = TableExtractor(path=f"{dataset_path}/pdf/{pdf_path}", separate_units=False, find_method=find_method, model=model, determine_row_space=True, max_column_space=4, max_row_space=2)
                 tables = tableExtractor.extractTables(page_index=0) # all pdfs contain only one page
                 page = tableExtractor.pages[0]
             except Exception as e:
@@ -133,10 +133,14 @@ def test(pdf_paths, annotated_tables, draw=False, tol=5, only_bbox=False, find_m
 
             test_table_cells = []
             for cell in test_table['cells']:
-                if cell['tokens'] == []:
+                if 'bbox' not in cell.keys():
                     continue
                 bbox = [cell['bbox'][0], page.height-cell['bbox'][3], cell['bbox'][2], page.height-cell['bbox'][1]]
-                text = page.crop(bbox).extract_text().replace('\n', ' ')
+                try: text = page.crop(bbox).extract_text().replace('\n', ' ')
+                except Exception as e:
+                    print(e)
+                    print(pdf_path)
+                    continue
                 test_table_cells.append({'bbox': bbox, 'text': text})
             test_table['cells'] = test_table_cells
 
@@ -205,9 +209,9 @@ if __name__ == '__main__':
     dataset_path = "fintabnet"
     pdf_paths = getPdfPaths(dataset_path + '/pdf')
 
-    sub_start = 100
-    sub_end = 200
-    thread_number = 1
+    sub_start = 0
+    sub_end = 3000
+    thread_number = 12
     
     annotated_tables, total = extractAnnotatedTables(dataset_path + "/FinTabNet_1.0.0_table_test.jsonl", sub_start=sub_start, sub_end=sub_end)   
     batch_size = int(total/thread_number)
@@ -218,15 +222,16 @@ if __name__ == '__main__':
     total_matches = 0
     total_cell_matches = 0
 
-    match_list, mismatch_list, cell_match_list = test(pdf_paths, annotated_tables, tol=tol, draw=True, only_bbox=False, find_method='model-based')
-    total_matches = len(match_list)
-    total_cell_matches = len(cell_match_list)
+    #match_list, mismatch_list, cell_match_list = test(pdf_paths, annotated_tables, tol=tol, draw=True, only_bbox=False, find_method='model-based')
+    #total_matches = len(match_list)
+    #total_cell_matches = len(cell_match_list)
 
-    #with concurrent.futures.ProcessPoolExecutor(max_workers=thread_number) as executor:
-    #    matches = [executor.submit(test, pdf_paths, annotated_tables[i*batch_size:(i+1)*batch_size], tol=tol, draw=False) for i in range(thread_number)]
-    #    for m in matches:
-    #        match_list, mismatch_list = m.result()
-    #        total_matches += len(match_list)
+    with concurrent.futures.ProcessPoolExecutor(max_workers=thread_number) as executor:
+        matches = [executor.submit(test, pdf_paths, annotated_tables[i*batch_size:(i+1)*batch_size], tol=tol, draw=False, only_bbox=False, find_method='model-based') for i in range(thread_number)]
+        for m in matches:
+            match_list, mismatch_list, cell_match_list = m.result()
+            total_matches += len(match_list)
+            total_cell_matches += len(cell_match_list)
 
     q.put(True)
 
@@ -234,6 +239,7 @@ if __name__ == '__main__':
 
     print(f"Matches: {total_matches}/{total}\t{total_matches/total*100} %")
     print(f"Cell Matches: {total_cell_matches}/{total_matches}\t{total_cell_matches/total_matches*100} %")
+    print(f"Cell Matches: {total_cell_matches}/{total}\t{total_cell_matches/total*100} %")
 
     s1 = time.time()
     print(f"{int((s1-s0) / 60)}:{int(s1-s0) % 60} minutes")

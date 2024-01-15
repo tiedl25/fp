@@ -12,7 +12,7 @@ else:
     from .layout_extractor import LayoutExtractor
 
 class TableExtractor:
-    def __init__(self, path, separate_units=False, find_method='rule-based', model=None, max_column_space=5, max_row_space=2):
+    def __init__(self, path, separate_units=False, find_method='rule-based', model=None, determine_row_space=False, max_column_space=5, max_row_space=2):
         self.path = path
         pdf = pdfplumber.open(path)
         self.pages = pdf.pages
@@ -21,6 +21,7 @@ class TableExtractor:
         self.model = model
         self.max_columns_space = max_column_space
         self.max_row_space = max_row_space
+        self.determine_row_space = determine_row_space
 
     def tableToDataframe(self, table):
         """
@@ -103,8 +104,7 @@ class TableExtractor:
             d = chars[i+1]['top'] - chars[i]['bottom']
             if d > 0:
                 diff.append(d)
-        print(statistics.mode(diff))
-        return statistics.mode(diff)-0.2
+        return min(diff)-0.1#statistics.mode(diff)-0.2
 
     def extractTable(self, page, table_index=0, table=None, img_path=None, image=None):
         """
@@ -142,7 +142,7 @@ class TableExtractor:
 
                 page_crop = page.crop(table['bbox'])
                 le = LayoutExtractor(table, page_crop, separate_units=self.separate_units)
-                footnote_complete, _, _ = le.find_layout(self.max_columns_space, self.max_row_space, ['$', '%'])
+                footnote_complete, _, _ = le.find_layout(self.max_columns_space, self.max_row_space if not self.determine_row_space else self.determine_average_line_height(page), ['$', '%'])
 
                 threshold += 5
 
@@ -166,7 +166,7 @@ class TableExtractor:
 
             le = LayoutExtractor(table, page_crop, separate_units=self.separate_units)
             # TODO average line height
-            le.find_layout(self.max_columns_space, self.determine_average_line_height(page), ['$', '%'], ignore_footnote=True)
+            le.find_layout(self.max_columns_space, self.max_row_space if not self.determine_row_space else self.determine_average_line_height(page), ['$', '%'], ignore_footnote=True)
 
 
         # for both methods
@@ -277,7 +277,7 @@ if __name__ == '__main__':
     else :
         model = None    
 
-    te = TableExtractor(path="fintabnet/pdf/ADS/2015/page_115.pdf", separate_units=False, find_method=find_method, model=model)
+    te = TableExtractor(path="fintabnet/pdf/ADS/2007/page_180.pdf", separate_units=False, find_method=find_method, model=model, determine_row_space=False, max_column_space=4, max_row_space=2)
     tables = te.extractTables(img_path='table')
     
     #dataframes = [te.tableToDataframe(table['text']) for table in tables]

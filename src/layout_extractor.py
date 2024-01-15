@@ -26,7 +26,7 @@ class LayoutExtractor:
             For special characters it also creates separate columns, defined by a rectangle.
         '''
         chars = sorted(clipping.chars, key=lambda e: e['x0'])
-        chars = [char for char in chars if char['text'] != ' ']
+        chars = [char for char in chars if char['text']  not in [' ', '.']]
         separator = []
 
         for i in range(len(chars)-1):
@@ -35,7 +35,7 @@ class LayoutExtractor:
 
             if diff > max_diff or (diff > 3 and char['fontname'] != chars[i]['fontname']):
                 top, bottom = clipping.bbox[1], clipping.bbox[3]
-                separator.append({'x0': char['x0']-1, 'top': top, 'x1': char['x0']-1, 'bottom': bottom, 'object_type': 'line', 'height': bottom-top})
+                separator.append({'x0': char['x0']-2, 'top': top, 'x1': char['x0']-2, 'bottom': bottom, 'object_type': 'line', 'height': bottom-top})
 
             # special characters can be defined such as $ or % that are treated as separate columns
             if self.separate_units and (chars[0]['text'] in special_symbols or char['text'] in special_symbols):
@@ -69,7 +69,7 @@ class LayoutExtractor:
 
             # separate header if font changes for the first time
             if chars[i+1]['fontname'] != chars[i]['fontname'] and header_separator is None:
-                header_separator = avg if diff > 0 else self.table['bbox'][1]
+                header_separator = avg if diff > 0 else chars[i]['top']#self.table['bbox'][1]
 
             # separate footer
             #if chars[i+1]['size'] != chars[i]['size']:
@@ -131,6 +131,44 @@ class LayoutExtractor:
         rows.append(rect) # to get the bottom and top separator
         self.row_separator = rows   
 
+    def find_layout(self, x_space, y_space, symbols, ignore_footnote=False):
+        footnote_complete, self.row_separator, self.table['header'] = self.find_rows(y_space)
+
+        if not footnote_complete and not ignore_footnote: return footnote_complete, None, None
+
+        i=0
+        col_sep = []
+
+        self.row_separator.extend([{'x0': self.table['bbox'][0], 'x1': self.table['bbox'][2], 'width': self.table['bbox'][2] - self.table['bbox'][0], 'object_type': 'line', 'top': x['top'], 'bottom': x['bottom']} for x in self.table['lines']])
+
+        self.row_separator = sorted(self.row_separator, key=lambda e: e['top'])
+
+        # table is separated in horizontal segments: the columns are individual for each segment (important for multi-header tables)
+        # segments are defined by the top and bottom lines of the table, the header and the footer and the ruling lines above the headerline
+        segments = [{'top': self.table['bbox'][1]}]
+        segments.extend(self.table_lines.copy() if self.table['header'] == self.table['bbox'][1] else [x for x in self.row_separator.copy() if x['top'] < self.table['header']])
+        segments.extend([{'top': self.table['header'], 'bottom': self.table['header']}, {'bottom': self.table['footer']}])
+
+        while i < len(segments)-1:
+            bbox = self.clipping.bbox.copy()
+            bbox[1] = segments[i]['top']
+            bbox[3] = segments[i+1]['bottom']
+            try: a = self.find_columns(self.clipping.crop(bbox), x_space, symbols)
+            except: 
+                #print("Error: No columns could be found in segment " + str(i))
+                i+=1
+                continue
+            col_sep.extend(a)
+
+            i+=1
+
+        self.column_separator = col_sep
+
+
+        #self.column_separator = self.find_columns(self.clipping, x_space, symbols)
+
+        return footnote_complete, self.column_separator, self.row_separator
+
     def get_table_settings(self):
         vertical_lines = [self.table['bbox'][0], self.table['bbox'][2]] # left and right line
         horizontal_lines = [self.table['bbox'][1], self.table['footer']] # top and bottom line
@@ -154,42 +192,6 @@ class LayoutExtractor:
         }
 
         return table_settings
-
-    def find_layout(self, x_space, y_space, symbols, ignore_footnote=False):
-        footnote_complete, self.row_separator, self.table['header'] = self.find_rows(y_space)
-
-        if not footnote_complete and not ignore_footnote: return footnote_complete, None, None
-
-        i=0
-        col_sep = []
-
-        self.row_separator.extend(self.table_lines)
-        self.row_separator = sorted(self.row_separator, key=lambda e: e['top'])
-
-        # table is separated in horizontal segments: the columns are individual for each segment (important for multi-header tables)
-        # segments are defined by the top and bottom lines of the table, the header and the footer and the ruling lines above the headerline
-        segments = [{'top': self.table['bbox'][1]}]
-        segments.extend(self.table_lines.copy() if self.table['header'] == self.table['bbox'][1] else [x for x in self.table_lines.copy() if x['top'] < self.table['header']])
-        segments.extend([{'top': self.table['header'], 'bottom': self.table['header']}, {'bottom': self.table['footer']}])
-
-        while i < len(segments)-1:
-            bbox = self.clipping.bbox.copy()
-            bbox[1] = segments[i]['top']
-            bbox[3] = segments[i+1]['bottom']
-            try: a = self.find_columns(self.clipping.crop(bbox), x_space, symbols)
-            except: 
-                i+=1
-                continue
-            col_sep.extend(a)
-
-            i+=1
-
-        self.column_separator = col_sep
-
-
-        #self.column_separator = self.find_columns(self.clipping, x_space, symbols)
-
-        return footnote_complete, self.column_separator, self.row_separator
 
 if __name__ == '__main__':
     path = "examples/pdf/FDX/2017/page_27.pdf"

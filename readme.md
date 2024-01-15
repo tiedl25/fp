@@ -42,6 +42,9 @@ The approach I now use, when I find a change in size I also check if the y-dista
 ##### Multi-Header Tables
 To improve column extraction in tables with headers consisting of more than one level, the table is divided into multiple horizontal segments. The header is separated from the rest of the table. The header-line, which separates those two, is hereby defined by the first occurrence of a font-change between two characters, when they are sorted from top to bottom. If there is noch such difference the first row-separator is used. The header is now separated into further segments based on ruling lines and found row separators.
 
+##### Average line space
+To further improve the row extraction, the line spacing is used. The average line spacing (python: statistics.mode()) and the minimum line spacing (python min()) were compared. In general the minimum line spacing gives better results, but the user will be allowed to change that, as well as to set a custom value.
+
 #### Table Object
 Dictionary:
     bbox: 
