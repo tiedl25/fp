@@ -69,7 +69,7 @@ class LayoutExtractor:
 
             # separate header if font changes for the first time
             if chars[i+1]['fontname'] != chars[i]['fontname'] and header_separator is None:
-                header_separator = avg if diff > 0 else chars[i]['top']-1
+                header_separator = avg if diff > 0 else self.table['bbox'][1]
 
             # separate footer
             #if chars[i+1]['size'] != chars[i]['size']:
@@ -83,6 +83,9 @@ class LayoutExtractor:
         if footnote_complete == None: 
             separator.extend(footnote_separator)
             footnote_complete = True
+
+        if header_separator == self.table['bbox'][1] and len(separator) > 0:
+            header_separator = separator[0]['top']
 
         bbox = copy.copy(self.table['bbox'])
         bbox[3] = self.table['footer']
@@ -159,6 +162,12 @@ class LayoutExtractor:
 
         i=0
         col_sep = []
+
+        self.row_separator.extend(self.table_lines)
+        self.row_separator = sorted(self.row_separator, key=lambda e: e['top'])
+
+        # table is separated in horizontal segments: the columns are individual for each segment (important for multi-header tables)
+        # segments are defined by the top and bottom lines of the table, the header and the footer and the ruling lines above the headerline
         segments = [{'top': self.table['bbox'][1]}]
         segments.extend(self.table_lines.copy() if self.table['header'] == self.table['bbox'][1] else [x for x in self.table_lines.copy() if x['top'] < self.table['header']])
         segments.extend([{'top': self.table['header'], 'bottom': self.table['header']}, {'bottom': self.table['footer']}])

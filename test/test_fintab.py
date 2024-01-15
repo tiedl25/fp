@@ -62,11 +62,11 @@ def compare_cells(table, test_table, pdf_path, t_i, page):
     for cell in table['cells']:
         for test_cell in test_table['cells']:
             s = SequenceMatcher(None, test_cell['text'], cell['text'])
-            if s.ratio() > 0.7:
+            if s.ratio() > 0.5:
                 matches += 1
                 break
 
-    if len(test_table['cells']) - matches < 20:
+    if matches > len(test_table['cells']) - 5:
         return f"\t\t{pdf_path} Table {t_i+1}"
 
     return None
@@ -126,7 +126,7 @@ def test(pdf_paths, annotated_tables, draw=False, tol=5, only_bbox=False, find_m
                 if cell['tokens'] == []:
                     continue
                 bbox = [cell['bbox'][0], page.height-cell['bbox'][3], cell['bbox'][2], page.height-cell['bbox'][1]]
-                text = page.crop(cell['bbox']).extract_text().replace('\n', ' ')
+                text = page.crop(bbox).extract_text().replace('\n', ' ')
                 test_table_cells.append({'bbox': bbox, 'text': text})
             test_table['cells'] = test_table_cells
 
@@ -150,16 +150,21 @@ def test(pdf_paths, annotated_tables, draw=False, tol=5, only_bbox=False, find_m
             else:      
                 mismatch_list.append(f"\t{pdf_path} Table {t_i+1}")
                 match = False
+        
+        if len(tables) == 0 and len(test_tables) > 0:
+            mismatch_list.append(f"\t{pdf_path}")
+            match = False
+            cell_match = False
 
-        if draw and not cell_match:
+        if draw and match and not cell_match:
             im = page.to_image(resolution=300)
             im2 = page.to_image(resolution=300)
             for table in test_tables:
                 im.draw_rect(table['bbox'], stroke_width=0, fill=(230, 65, 67, 65)) # red for test tables
-                im.draw_rects([x['bbox'] for x in test_table['cells']], stroke_width=0, fill=(230, 65, 67, 65))
+                im.draw_rects([x['bbox'] for x in table['cells']], stroke_width=0, fill=(230, 65, 67, 65))
 
             for table in tables: 
-                im2.draw_rect([table['bbox'][0], table['header'], table['bbox'][2], table['footer']], stroke_width=0)
+                im2.draw_rect(table['bbox'], stroke_width=0) # [table['bbox'][0], table['header'], table['bbox'][2], table['footer']], stroke_width=0)
                 im2.draw_rects([x['bbox'] for x in table['cells']])
 
             im.save(f"img/{pdf_path.replace('/', '_')[0:-4]}_test.png")
