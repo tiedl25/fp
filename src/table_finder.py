@@ -396,7 +396,8 @@ class TableFinder:
 
             derived_tables = []
             for t_i, table in enumerate(table_boxes):
-                bbox = [x/image.scale for x in table.xyxy.tolist()[0]]#self.extend_table(top_threshold=2, bottom_threshold=2, bbox=[x/image.scale for x in table.xyxy.tolist()[0]]) # apply image scale and extend bbox
+                #bbox = [x/image.scale for x in table.xyxy.tolist()[0]]
+                bbox = self.extend_table(top_threshold=2, bottom_threshold=2, bbox=[x/image.scale for x in table.xyxy.tolist()[0]]) # apply image scale and extend bbox
                 derived_tables.append({'bbox': bbox, 'lines': self.lines, 'settings': {}, 'cells': []})
                 derived_tables[t_i]['footer'] = derived_tables[t_i]['bbox'][3]
                 derived_tables[t_i]['header'] = derived_tables[t_i]['bbox'][1]        

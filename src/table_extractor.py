@@ -2,17 +2,21 @@ import pandas as pd
 import pdfplumber
 import copy
 import statistics
+import os
+
 from ultralyticsplus import YOLO, render_result
 
 if __name__ == '__main__':  
     from table_finder import TableFinder
     from layout_extractor import LayoutExtractor
 else:
-    from .table_finder import TableFinder
-    from .layout_extractor import LayoutExtractor
+    try: from .table_finder import TableFinder
+    except: from table_finder import TableFinder
+    try: from .layout_extractor import LayoutExtractor
+    except: from layout_extractor import LayoutExtractor
 
 class TableExtractor:
-    def __init__(self, path, separate_units=False, find_method='rule-based', model=None, determine_row_space=False, max_column_space=5, max_row_space=2):
+    def __init__(self, path, separate_units=False, find_method='rule-based', model=None, determine_row_space="min", max_column_space=5, max_row_space=2):
         self.path = path
         pdf = pdfplumber.open(path)
         self.pages = pdf.pages
@@ -95,7 +99,9 @@ class TableExtractor:
 
         return [b1['x0'], b2['top'], b3['x1'], b4['bottom']]
 
-    def determine_average_line_height(self, page):
+    def determine_max_linepitch(self, page):
+        if self.determine_row_space == "value": return self.max_row_space
+
         chars = sorted(page.chars, key=lambda e: e['top'])
         chars = [char for char in chars if char['text'] != ' ']
 
@@ -104,9 +110,10 @@ class TableExtractor:
             d = chars[i+1]['top'] - chars[i]['bottom']
             if d > 0:
                 diff.append(d)
-        return min(diff)-0.1#statistics.mode(diff)-0.2
 
-    def extractTable(self, page, table_index=0, table=None, img_path=None, image=None):
+        return min(diff)-0.1 if self.determine_row_space == "min" else statistics.mode(diff)-0.1
+
+    def extractTable(self, page, table_index=0, table=None, img_path=None, image=None, overwrite=False):
         """
         Extracts a table from a given page. Either by rule-based or custom method based on pdfplumbers table extraction.
         For the later method, the bounding box is retrieved with the TableFinder class and the columns and rows with the LayoutExtractor class.
@@ -142,7 +149,7 @@ class TableExtractor:
 
                 page_crop = page.crop(table['bbox'])
                 le = LayoutExtractor(table, page_crop, separate_units=self.separate_units)
-                footnote_complete, _, _ = le.find_layout(self.max_columns_space, self.max_row_space if not self.determine_row_space else self.determine_average_line_height(page), ['$', '%'])
+                footnote_complete, _, _ = le.find_layout(self.max_columns_space, self.determine_max_linepitch(page), ['$', '%'])
 
                 threshold += 5
 
@@ -166,7 +173,7 @@ class TableExtractor:
 
             le = LayoutExtractor(table, page_crop, separate_units=self.separate_units)
             # TODO average line height
-            le.find_layout(self.max_columns_space, self.max_row_space if not self.determine_row_space else self.determine_average_line_height(page), ['$', '%'], ignore_footnote=True)
+            le.find_layout(self.max_columns_space, self.determine_max_linepitch(page), ['$', '%'], ignore_footnote=True)
 
 
         # for both methods
@@ -193,15 +200,20 @@ class TableExtractor:
         # original cells
         table['pdfplumber_cells'] = {'cells': pdfplumber_table.cells, 'text': pdfplumber_table.extract(x_tolerance=2)}
 
-        if img_path != None:
-            im = page_crop.to_image(resolution=300)
-            im.draw_lines(table['lines'], stroke_width=3, stroke=(0,0,0)) # redraw existing lines
-            im.debug_tablefinder(table_settings)
-            im.save(f'{img_path}.png')
+        if img_path is not None: 
+            image = page_crop.to_image(resolution=300)
+            image.draw_lines(table['lines'], stroke_width=3, stroke=(0,0,0)) # redraw existing lines
+            image.debug_tablefinder(table['settings'])
+            if not os.path.exists(img_path): os.mkdir(img_path)
+            name = f'{img_path}/{os.path.basename(self.path)[0:-4]}_table_{table_index}.png'
+            if os.path.exists(name) and overwrite==False:
+                inp = input("File already exists. Overwrite (yes/no)?\n")
+                if inp in ["y", "yes"]: image.save(name)
+            else: image.save(name)
 
         return table
 
-    def extractTablesInPage(self, page_index, img_path=None):
+    def extractTablesInPage(self, page_index, img_path=None, overwrite=False):
         """
         Extracts tables from a specific page in the document.
 
@@ -236,13 +248,19 @@ class TableExtractor:
             #image.debug_tablefinder(table['settings'])
             image.draw_rect(table['bbox'])
             image.draw_rects(x['bbox'] for x in table['cells'])
-            image.draw_hline(table['header'])
+            #image.draw_hline(table['header'])
         
-        if img_path != None: image.save(f'{img_path}_{page_index}.png')
+        if img_path is not None: 
+            if not os.path.exists(img_path): os.mkdir(img_path)
+            name = f'{img_path}/{os.path.basename(self.path)[0:-4]}_page_{page_index}.png'
+            if os.path.exists(name) and overwrite==False:
+                inp = input("File already exists. Overwrite (yes/no)?\n")
+                if inp in ["y", "yes"]: image.save(name)
+            else: image.save(name)
         
         return extracted_tables
 
-    def extractTables(self, page_index=None, img_path=None):
+    def extractTables(self, page_index=None, img_path=None, overwrite=False):
         """
         Extracts tables from the specified page or all pages if no page index is provided.
         
@@ -254,11 +272,11 @@ class TableExtractor:
             list: A list of extracted tables.
         """
         if page_index != None:
-            return self.extractTablesInPage(page_index, img_path)
+            return self.extractTablesInPage(page_index, img_path, overwrite)
 
         extracted_tables = []
         for i in range(len(self.pages)):
-            extracted_tables.extend(self.extractTablesInPage(i, img_path))
+            extracted_tables.extend(self.extractTablesInPage(i, img_path, overwrite))
         
         return extracted_tables
 
@@ -277,8 +295,8 @@ if __name__ == '__main__':
     else :
         model = None    
 
-    te = TableExtractor(path="fintabnet/pdf/ADS/2007/page_180.pdf", separate_units=False, find_method=find_method, model=model, determine_row_space=False, max_column_space=4, max_row_space=2)
-    tables = te.extractTables(img_path='table')
+    te = TableExtractor(path="fintabnet/pdf/ADS/2007/page_180.pdf", separate_units=False, find_method=find_method, model=model, determine_row_space="min", max_column_space=4, max_row_space=2)
+    tables = te.extractTables(img_path='.')
     
     #dataframes = [te.tableToDataframe(table['text']) for table in tables]
     #for i, df in enumerate(dataframes): te.export('excel', f'excel/test_{i}', dataframe=df)

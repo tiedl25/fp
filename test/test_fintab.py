@@ -98,7 +98,7 @@ def test(pdf_paths, annotated_tables, draw=False, tol=5, only_bbox=False, find_m
                     continue
         else:
             try: 
-                tableExtractor = TableExtractor(path=f"{dataset_path}/pdf/{pdf_path}", separate_units=False, find_method=find_method, determine_row_space=True, max_column_space=4, max_row_space=2)
+                tableExtractor = TableExtractor(path=f"{dataset_path}/pdf/{pdf_path}", separate_units=False, find_method=find_method, determine_row_space="min", max_column_space=4, max_row_space=2)
                 tables = tableExtractor.extractTables(page_index=0) # all pdfs contain only one page
                 page = tableExtractor.pages[0]
             except Exception as e:
