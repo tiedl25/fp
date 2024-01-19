@@ -45,6 +45,12 @@ To improve column extraction in tables with headers consisting of more than one 
 ##### Average line space
 To further improve the row extraction, the line spacing is used. The average line spacing (python: statistics.mode()) and the minimum line spacing (python min()) were compared. In general the minimum line spacing gives better results, but the user will be allowed to change that, as well as to set a custom value.
 
+##### Shrink Cells
+Remove dots and spaces and shrink extracted cells to minimum bounding box.
+
+##### Page Layout for table width
+Increase the table width if the page layout indicates a one column page.
+
 #### Table Object
 Dictionary:
     bbox: 
@@ -53,8 +59,3 @@ Dictionary:
     cells: cells extracted with pdfplumber, shrinked and formated as {bbox: , text:} dictionary pair
     pdfplumber_cells: dictionary containing cells extracted with pdfplumber and the corresponding text
     settings: settings for pdfplumber table extraction
-
-### Problems
-+ Not every table in the pdfs is given in the annotated json file
-+ Some tables don't consist of any line
-+ The maximum differences are difficult to assign generally

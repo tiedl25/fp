@@ -323,6 +323,22 @@ class TableFinder:
 
         return statistics.mode(diff)
         
+    def one_column_layout(self, top, bottom):
+        """
+        Determine if table takes whole page width or lies in one of the columns of the page.
+        
+        Parameters:
+            top (int): The y-coordinate of the top of the cropping region.
+            bottom (int): The y-coordinate of the bottom of the cropping region.
+        
+        Returns:
+            bool: True if the table lies in one column, False otherwise.
+        """
+        mid = self.page.width/2
+        objs = self.page.crop([mid-5, top, mid+5, bottom])
+        objs = objs.chars + objs.lines
+        return len(objs) > 0
+            
     def find_tables(self, bottom_threshold=5, top_threshold=4, left_threshold=2, right_threshold=2, find_method='rule-based', image=None):
         """
         Finds tables in the given document based on certain thresholds.
@@ -336,7 +352,6 @@ class TableFinder:
         Returns:
             list: A list of derived tables found in the document.
         """
-
         self.lines = [x for x in self.lines if x['x0'] != x['x1']] # remove vertical lines
         self.lines.extend(self.collapse_rects())
         self.lines.sort(key = lambda e: e['top'])
@@ -349,25 +364,19 @@ class TableFinder:
                     continue
                 
                 bottom = self.find_table_bottom([line['x0'], line['top'], line['x1'], self.page.bbox[3]], bottom_threshold)
-                top = self.find_table_top([line['x0'], self.page.bbox[1], line['x1'], line['bottom']], top_threshold)
+                top = self.find_table_top([line['x0'], self.page.bbox[1], line['x1'], line['bottom']], top_threshold, must_contain_chars=True)
 
                 if top >= bottom:
                     continue
-                    
-                left = self.find_table_left([self.page.bbox[0], top, line['x0'], bottom], left_threshold)
-                right = self.find_table_right([line['x1'], top, self.page.bbox[2], bottom], right_threshold)
 
-                mid = self.page.width/2
-                objs = self.page.crop([mid-5, top, mid+5, bottom])
-                objs = objs.chars + objs.lines
-                if len(objs) > 0:#not ((mid-5 < left and mid-5 < right) or (mid+5 > left and mid+5 > right)):
-                    left = self.page.bbox[0]#self.find_table_left([self.page.bbox[0], top, left, bottom], 50)
+                if self.one_column_layout(top+top_threshold, bottom+bottom_threshold):
+                    chars = sorted(self.page.crop([self.page.bbox[0], top, self.page.bbox[2], bottom]).chars, key=lambda e: e['x0'])
+                    left, right = chars[0]['x0'], chars[-1]['x1']
+                else: 
+                    left = self.find_table_left([self.page.bbox[0], top, line['x0'], bottom], left_threshold)
+                    right = self.find_table_right([line['x1'], top, self.page.bbox[2], bottom], right_threshold)
 
-                bbox = [left, top, right, bottom]
-
-                bbox = self.extend_table(bbox)
-
-                if len(objs) > 0: bbox[0] = self.find_table_left(bbox, 200)
+                bbox = self.extend_table([left, top, right, bottom])
 
                 table = {'bbox': bbox, 'lines': [line]}
 
@@ -402,8 +411,6 @@ class TableFinder:
                 derived_tables[t_i]['footer'] = derived_tables[t_i]['bbox'][3]
                 derived_tables[t_i]['header'] = derived_tables[t_i]['bbox'][1]        
             
-
-
         # Make sure that all the lines are within the table
         for t in derived_tables:
             t['lines'] = [x for x in t['lines'] if (x['x0']>=t['bbox'][0]-2 and x['x1']<=t['bbox'][2]+2 and
