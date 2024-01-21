@@ -244,11 +244,13 @@ class TableExtractor:
             if img_path is None:
                 continue
 
-            image.draw_lines(table['lines'], stroke_width=3, stroke=(0,0,0)) # redraw existing lines
-            #image.debug_tablefinder(table['settings'])
+            #image.draw_hlines([x['top'] for x in table['lines']], stroke_width=3, stroke=(230, 65, 67, 65)) # redraw existing lines
+            image.debug_tablefinder(table['settings'])
             image.draw_rect(table['bbox'])
             image.draw_rects(x['bbox'] for x in table['cells'])
+            image.draw_hline(table['footer'])
             #image.draw_hline(table['header'])
+            #image.draw_vline(page.width/2)
         
         if img_path is not None: 
             if not os.path.exists(img_path): os.mkdir(img_path)
@@ -281,7 +283,7 @@ class TableExtractor:
         return extracted_tables
 
 if __name__ == '__main__':  
-    find_method = 'model-based'
+    find_method = 'rule-based'
 
     if find_method == 'model-based':
         # load model
@@ -295,7 +297,7 @@ if __name__ == '__main__':
     else :
         model = None    
 
-    te = TableExtractor(path="fintabnet/pdf/ADS/2007/page_180.pdf", separate_units=False, find_method=find_method, model=model, determine_row_space="min", max_column_space=4, max_row_space=2)
+    te = TableExtractor(path="fintabnet/pdf/AMZN/2008/page_68.pdf", separate_units=False, find_method=find_method, model=model, determine_row_space="min", max_column_space=4, max_row_space=2)
     tables = te.extractTables(img_path='.')
     
     #dataframes = [te.tableToDataframe(table['text']) for table in tables]

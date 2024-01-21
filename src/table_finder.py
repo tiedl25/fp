@@ -207,10 +207,10 @@ class TableFinder:
             lr = bbox[2] < table_bbox[0] #bbox right side is on the left of the table
             rr = bbox[2] > table_bbox[2] #bbox right side is on the right of the table
             rl = bbox[0] > table_bbox[2] #bbox left side is on the right of the table
-            tt = bbox[1] < table_bbox[1] #bbox top side is on top of the table
-            tb = bbox[3] < table_bbox[1] #bbox bottom side is on top of the table
-            bb = bbox[3] > table_bbox[3] #bbox bottom side is below the table
-            bt = bbox[1] > table_bbox[3] #bbox top side is below the table
+            tt = bbox[1] + 10 < table_bbox[1] #bbox top side is on top of the table
+            tb = bbox[3] + 10 < table_bbox[1] #bbox bottom side is on top of the table
+            bb = bbox[3] - 10 > table_bbox[3] #bbox bottom side is below the table
+            bt = bbox[1] - 10 > table_bbox[3] #bbox top side is below the table
 
             l_inside = not (ll or rl)
             r_inside = not (lr or rr)
@@ -277,6 +277,8 @@ class TableFinder:
                     table_bbox[0] = bbox[0]
                     table_bbox[2] = bbox[2]
 
+        #table['bbox'] = self.extend_table(table['bbox'])
+
         self.tables = derived_tables
         return table
 
@@ -335,7 +337,7 @@ class TableFinder:
             bool: True if the table lies in one column, False otherwise.
         """
         mid = self.page.width/2
-        objs = self.page.crop([mid-5, top, mid+5, bottom])
+        objs = self.page.crop([mid-3, top, mid+3, bottom])
         objs = objs.chars + objs.lines
         return len(objs) > 0
             
@@ -370,7 +372,7 @@ class TableFinder:
                     continue
 
                 if self.one_column_layout(top+top_threshold, bottom+bottom_threshold):
-                    chars = sorted(self.page.crop([self.page.bbox[0], top, self.page.bbox[2], bottom]).chars, key=lambda e: e['x0'])
+                    chars = sorted([x for x in self.page.crop([self.page.bbox[0], top, self.page.bbox[2], bottom]).chars if x['matrix'][1] == 0 and x['matrix'][2] == 0], key=lambda e: e['x0'])
                     left, right = chars[0]['x0'], chars[-1]['x1']
                 else: 
                     left = self.find_table_left([self.page.bbox[0], top, line['x0'], bottom], left_threshold)
@@ -400,6 +402,7 @@ class TableFinder:
                         break
 
                 self.tables = derived_tables
+
         elif find_method == 'model-based' and self.model is not None and image is not None:
             table_boxes = self.model.predict(image.original)[0].boxes
 
@@ -421,7 +424,7 @@ class TableFinder:
 if __name__ == '__main__':
     tables = []
 
-    with pdfplumber.open("fintabnet/pdf/AAL/2003/page_64.pdf") as pdf:
+    with pdfplumber.open("fintabnet/pdf/AKAM/2006/page_64.pdf") as pdf:
         page = pdf.pages[0]
         t_finder = TableFinder(page)
         tables = t_finder.find_tables()
