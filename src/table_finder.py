@@ -140,25 +140,57 @@ class TableFinder:
         Returns:
             list: A list of dictionaries representing concatenated lines.
         """
+        concat_line_segments = []
+        if len(lst) == 0:
+            return concat_line_segments
+        current_line = lst.pop(0)
+
+        for i, line in enumerate(lst):
+            if current_line['top'] == line['top'] and line['x1'] > current_line['x1'] and line['x0'] <= current_line['x1']:
+                current_line['x1'] = line['x1']
+                current_line['width'] = current_line['width'] + line['width']
+                current_line['pts'][1] = line['pts'][1]
+
+            else:
+                if current_line['x0'] < self.page.bbox[0] or current_line['top'] < self.page.bbox[1]:
+                    continue
+                concat_line_segments.append(current_line)
+                current_line = line
+
+        if current_line['x0'] < self.page.bbox[0] or current_line['top'] < self.page.bbox[1]:
+            return concat_line_segments
+
+        concat_line_segments.append(current_line) #append last line also to concat_lines
+
+        return concat_line_segments
+    
+    def concat_line_segments(self, lst):
+        """
+        Concatenate line elements with the same distance to the top of the page, that are not recognized as one
+
+        Args:
+            lst (list): A list of dictionaries representing lines.
+
+        Returns:
+            list: A list of dictionaries representing concatenated lines.
+        """
         concat_lines = []
         if len(lst) == 0:
             return concat_lines
         current_line = lst.pop(0)
+        current_line['segments'] = []
 
-        for i, line in enumerate(lst):
-            if current_line['top'] == line['top']:
-                if line['x1'] > current_line['x1']:
-                    current_line['x1'] = line['x1']
-                    current_line['width'] = current_line['width'] + line['width']
-                    current_line['pts'][1] = line['pts'][1]
+        for line in lst:
+            if current_line['top'] == line['top'] and line['x1'] > current_line['x1']:
+                current_line['x1'] = line['x1']
+                current_line['width'] = current_line['width'] + line['width']
+                current_line['pts'][1] = line['pts'][1]
+                if len(current_line['segments']) == 0: current_line['segments'] = [current_line]
+                else: current_line['segments'].append(line)
             else:
-                if current_line['x0'] < self.page.bbox[0] or current_line['top'] < self.page.bbox[1]:
-                    continue
                 concat_lines.append(current_line)
                 current_line = line
-
-        if current_line['x0'] < self.page.bbox[0] or current_line['top'] < self.page.bbox[1]:
-            return concat_lines
+                current_line['segments'] = []
 
         concat_lines.append(current_line) #append last line also to concat_lines
 
@@ -357,7 +389,8 @@ class TableFinder:
         self.lines = [x for x in self.lines if x['x0'] != x['x1']] # remove vertical lines
         self.lines.extend(self.collapse_rects())
         self.lines.sort(key = lambda e: e['top'])
-        self.lines = self.concat_lines(self.lines)
+        line_segments = self.concat_lines(self.lines)
+        self.lines = self.concat_line_segments(line_segments)
 
         if find_method == 'rule-based':
             bottom_threshold = self.determine_average_line_height()

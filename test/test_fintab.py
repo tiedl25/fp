@@ -213,8 +213,8 @@ if __name__ == '__main__':
     pdf_paths = getPdfPaths(dataset_path + '/pdf')
 
     sub_start = 0
-    sub_end = 3000
-    thread_number = 12
+    sub_end = 100
+    thread_number = 4
     
     annotated_tables, total = extractAnnotatedTables(dataset_path + "/FinTabNet_1.0.0_table_test.jsonl", sub_start=sub_start, sub_end=sub_end)   
     batch_size = int(total/thread_number)
