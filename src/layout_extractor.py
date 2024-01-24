@@ -161,16 +161,18 @@ class LayoutExtractor:
         self.row_separator = rows   
 
     def test_footnote(self):
-        if len(self.table_lines) > 1:
-            # test if the last segment is actually the footnote
-            bbox = self.clipping.bbox.copy()
-            bbox[1] = self.table_lines[-1]['bottom']
-            bbox[3] = self.table['bbox'][3]
-            c = self.clipping.crop(bbox).extract_words()
-            w = c[0]['text'][0] + c[0]['text'][2] if len(c[0]['text']) > 2 else ""
-            #test = self.find_columns(self.clipping.crop(bbox), x_space, symbols)
-            if w == '()' or len(c[0]['text']) == 1:#len(test) == 0:
-                self.table['footer'] = self.table_lines[-1]['bottom']
+        if len(self.table_lines) <= 1:
+            return
+
+        # test if the last segment is actually the footnote
+        bbox = self.clipping.bbox.copy()
+        bbox[1] = self.table_lines[-1]['bottom']
+        bbox[3] = self.table['bbox'][3]
+        c = self.clipping.crop(bbox).extract_words()
+        w = c[0]['text'][0] + c[0]['text'][2] if len(c[0]['text']) > 2 else ""
+        #test = self.find_columns(self.clipping.crop(bbox), x_space, symbols)
+        if w == '()' or c[0]['text'] == '*':#len(test) == 0:
+            self.table['footer'] = self.table_lines[-1]['bottom']
 
     def remove_unessessary_columns(self):
         self.column_separator = sorted(self.column_separator, key=lambda e: e['x0'])
@@ -197,26 +199,9 @@ class LayoutExtractor:
     def find_layout(self, x_space, y_space, symbols, ignore_footnote=False):
         #self.test_footnote()
 
-        # find columns in whole table except for the footnote
         self.column_separator = []
         bbox = self.clipping.bbox.copy()
         bbox[3] = self.table['footer']
-        #try: self.column_separator = self.find_columns(self.clipping.crop(bbox), x_space, symbols)
-        #except: self.column_separator = []
-        
-        #try:
-        #    if len(self.table_lines) > 0:
-        #        # test if the last segment is actually the footnote
-        #        bbox = self.clipping.bbox.copy()
-        #        bbox[1] = self.table_lines[-1]['bottom']
-        #        bbox[3] = self.table['bbox'][3]
-        #        c = self.clipping.crop(bbox).extract_words()
-        #        w = c[0]['text'][0] + c[0]['text'][2] if len(c[0]['text']) > 2 else ""
-        #        #test = self.find_columns(self.clipping.crop(bbox), x_space, symbols)
-        #        if w == '()' or len(c[0]['text']) == 1:#len(test) == 0:
-        #            self.table['footer'] = self.table_lines[-1]['bottom']
-        #except: pass
-
 
         # find rows in whole table except for the footnote
         footnote_complete, self.row_separator, self.table['header'] = self.find_rows(self.clipping.crop(bbox), y_space)

@@ -229,6 +229,7 @@ if __name__ == '__main__':
 
     mmlist = []
     mlist = []
+    clist = []
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=thread_number) as executor:
         matches = [executor.submit(test, pdf_paths, annotated_tables[i*batch_size:(i+1)*batch_size], tol=tol, draw=True, only_bbox=False, find_method='rule-based') for i in range(thread_number)]
@@ -236,6 +237,7 @@ if __name__ == '__main__':
             match_list, mismatch_list, cell_match_list = m.result()
             mmlist.extend(mismatch_list)
             mlist.extend(match_list)
+            clist.extend(cell_match_list)
             total_matches += len(match_list)
             total_cell_matches += len(cell_match_list)
 
@@ -246,6 +248,9 @@ if __name__ == '__main__':
     print(f"Matches: {total_matches}/{total}\t{total_matches/total*100} %")
     print(f"Cell Matches: {total_cell_matches}/{total_matches}\t{total_cell_matches/total_matches*100} %")
     print(f"Cell Matches: {total_cell_matches}/{total}\t{total_cell_matches/total*100} %")
+
+    for x in clist:
+        print(x)
 
     s1 = time.time()
     print(f"{int((s1-s0) / 60)}:{int(s1-s0) % 60} minutes")

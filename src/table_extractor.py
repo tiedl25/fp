@@ -245,9 +245,9 @@ class TableExtractor:
                 continue
 
             #image.draw_hlines([x['top'] for x in table['lines']], stroke_width=3, stroke=(230, 65, 67, 65)) # redraw existing lines
-            image.debug_tablefinder(table['settings'])
+            #image.debug_tablefinder(table['settings'])
             #image.draw_rect(table['bbox'])
-            #image.draw_rects(x['bbox'] for x in table['cells'])
+            image.draw_rects(x['bbox'] for x in table['cells'])
             #image.draw_hline(table['footer'])
             #image.draw_hline(table['header'])
             #image.draw_vline(page.width/2)
@@ -297,7 +297,7 @@ if __name__ == '__main__':
     else :
         model = None    
 
-    te = TableExtractor(path="fintabnet/pdf/ADS/2007/page_172.pdf", separate_units=False, find_method=find_method, model=model, determine_row_space="min", max_column_space=4, max_row_space=2)
+    te = TableExtractor(path="fintabnet/pdf/ADS/2015/page_87.pdf", separate_units=False, find_method=find_method, model=model, determine_row_space="min", max_column_space=4, max_row_space=2)
     tables = te.extractTables(img_path='.')
     
     dataframes = [te.tableToDataframe(table['pdfplumber_cells']['text']) for table in tables]
