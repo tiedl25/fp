@@ -161,31 +161,31 @@ def test(pdf_paths, annotated_tables, draw=False, tol=5, only_bbox=False, find_m
             match = False
             cell_match = False
 
-        #if (draw and match and not cell_match) or (only_bbox and draw and not match):
-        #    im = page.to_image(resolution=300)
-        #    im2 = page.to_image(resolution=300)
-        #    for table in test_tables:
-        #        im.draw_rect(table['bbox'], stroke_width=0, fill=(230, 65, 67, 65)) # red for test tables
-        #        if not only_bbox: im.draw_rects([x['bbox'] for x in table['cells']], stroke_width=0, fill=(230, 65, 67, 65))
-#
-        #    for table in tables: 
-        #        im2.draw_rect(table['bbox'], stroke_width=0) # [table['bbox'][0], table['header'], table['bbox'][2], table['footer']], stroke_width=0)
-        #        if not only_bbox: im2.draw_rects([x['bbox'] for x in table['cells']])
-#
-        #    im.save(f"img/{pdf_path.replace('/', '_')[0:-4]}_test.png")
-        #    im2.save(f"img/{pdf_path.replace('/', '_')[0:-4]}.png")
-
-        if draw and not match:
+        if (draw and match and not cell_match) or (only_bbox and draw and not match):
             im = page.to_image(resolution=300)
+            im2 = page.to_image(resolution=300)
             for table in test_tables:
                 im.draw_rect(table['bbox'], stroke_width=0, fill=(230, 65, 67, 65)) # red for test tables
+                if not only_bbox: im.draw_rects([x['bbox'] for x in table['cells']], stroke_width=0, fill=(230, 65, 67, 65))
 
             for table in tables: 
-                im.draw_rect([table['bbox'][0], table['bbox'][1], table['bbox'][2], table['footer']], stroke_width=0)
-                #im.draw_hline(table['footer'])
+                im2.draw_rect(table['bbox'], stroke_width=0) # [table['bbox'][0], table['header'], table['bbox'][2], table['footer']], stroke_width=0)
+                if not only_bbox: im2.draw_rects([x['bbox'] for x in table['cells']])
 
+            im.save(f"img/{pdf_path.replace('/', '_')[0:-4]}_test.png")
+            im2.save(f"img/{pdf_path.replace('/', '_')[0:-4]}.png")
 
-            im.save(f"img/{pdf_path.replace('/', '_')[0:-4]}.png")
+        #if draw and not match:
+        #    im = page.to_image(resolution=300)
+        #    for table in test_tables:
+        #        im.draw_rect(table['bbox'], stroke_width=0, fill=(230, 65, 67, 65)) # red for test tables
+#
+        #    for table in tables: 
+        #        im.draw_rect([table['bbox'][0], table['bbox'][1], table['bbox'][2], table['footer']], stroke_width=0)
+        #        #im.draw_hline(table['footer'])
+#
+#
+        #    im.save(f"img/{pdf_path.replace('/', '_')[0:-4]}.png")
             
         i+=1
 
@@ -213,8 +213,8 @@ if __name__ == '__main__':
     pdf_paths = getPdfPaths(dataset_path + '/pdf')
 
     sub_start = 0
-    sub_end = 100
-    thread_number = 4
+    sub_end = 1000
+    thread_number = 12
     
     annotated_tables, total = extractAnnotatedTables(dataset_path + "/FinTabNet_1.0.0_table_test.jsonl", sub_start=sub_start, sub_end=sub_end)   
     batch_size = int(total/thread_number)
@@ -231,7 +231,7 @@ if __name__ == '__main__':
     mlist = []
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=thread_number) as executor:
-        matches = [executor.submit(test, pdf_paths, annotated_tables[i*batch_size:(i+1)*batch_size], tol=tol, draw=False, only_bbox=False, find_method='rule-based') for i in range(thread_number)]
+        matches = [executor.submit(test, pdf_paths, annotated_tables[i*batch_size:(i+1)*batch_size], tol=tol, draw=True, only_bbox=False, find_method='rule-based') for i in range(thread_number)]
         for m in matches:
             match_list, mismatch_list, cell_match_list = m.result()
             mmlist.extend(mismatch_list)
