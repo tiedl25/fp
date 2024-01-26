@@ -6,7 +6,6 @@ from src.table_finder import TableFinder
 from ultralyticsplus import YOLO, render_result
 from difflib import SequenceMatcher
 
-
 import numpy as np
 import os
 import json
@@ -64,7 +63,7 @@ def compare_cells(table, test_table, pdf_path, t_i, page):
     for cell in table['cells']:
         for test_cell in test_table['cells']:
             s = SequenceMatcher(None, test_cell['text'], cell['text'])
-            if s.ratio() > 0.5:
+            if s.ratio() > 0.7:
                 matches += 1
                 break
 
@@ -73,7 +72,7 @@ def compare_cells(table, test_table, pdf_path, t_i, page):
 
     return None
 
-def test(pdf_paths, annotated_tables, draw=False, tol=5, only_bbox=False, find_method='rule-based'):
+def test(pdf_paths, annotated_tables, draw='cell_match', tol=5, only_bbox=False, find_method='rule-based'):
     # load model
     model = YOLO('keremberke/yolov8s-table-extraction')
 
@@ -151,7 +150,9 @@ def test(pdf_paths, annotated_tables, draw=False, tol=5, only_bbox=False, find_m
                 # different criteria for matching
                 assert_horizontal = abs(table['bbox'][1] - test_table['bbox'][1]) < tol and abs(table['bbox'][3] - test_table['bbox'][3]) < tol
                 assert_vertical = abs(table['bbox'][0] - test_table['bbox'][0]) < tol and abs(table['bbox'][2] - test_table['bbox'][2]) < tol
-                assert_all = np.allclose(table['bbox'], test_table['bbox'], atol=tol)
+                b = table['bbox'].copy()
+                b[3] = table['footer']
+                assert_all = np.allclose(b, test_table['bbox'], atol=tol)
                 assert_except_bottom = abs(table['bbox'][1] - test_table['bbox'][1]) < tol and abs(table['bbox'][2] - test_table['bbox'][2]) < tol and abs(table['bbox'][0] - test_table['bbox'][0]) < tol
 
                 if assert_all:
@@ -170,19 +171,31 @@ def test(pdf_paths, annotated_tables, draw=False, tol=5, only_bbox=False, find_m
             match = False
             cell_match = False
 
-        if draw and match and not cell_match:
+        if (draw=='cell_match' and match and not cell_match) or (only_bbox and draw=='cell_match' and not match):
             im = page.to_image(resolution=300)
             im2 = page.to_image(resolution=300)
             for table in test_tables:
                 im.draw_rect(table['bbox'], stroke_width=0, fill=(230, 65, 67, 65)) # red for test tables
-                im.draw_rects([x['bbox'] for x in table['cells']], stroke_width=0, fill=(230, 65, 67, 65))
+                if not only_bbox: im.draw_rects([x['bbox'] for x in table['cells']], stroke_width=0, fill=(230, 65, 67, 65))
 
             for table in tables: 
                 im2.draw_rect(table['bbox'], stroke_width=0) # [table['bbox'][0], table['header'], table['bbox'][2], table['footer']], stroke_width=0)
-                im2.draw_rects([x['bbox'] for x in table['cells']])
+                if not only_bbox: im2.draw_rects([x['bbox'] for x in table['cells']])
 
             im.save(f"img/{pdf_path.replace('/', '_')[0:-4]}_test.png")
             im2.save(f"img/{pdf_path.replace('/', '_')[0:-4]}.png")
+
+        if draw=='bbox_match' and not match:
+            im = page.to_image(resolution=300)
+            for table in test_tables:
+                im.draw_rect(table['bbox'], stroke_width=0, fill=(230, 65, 67, 65)) # red for test tables
+
+            for table in tables: 
+                im.draw_rect([table['bbox'][0], table['bbox'][1], table['bbox'][2], table['footer']], stroke_width=0)
+                #im.draw_hline(table['footer'])
+
+
+            im.save(f"img/{pdf_path.replace('/', '_')[0:-4]}.png")
             
         i+=1
 
@@ -210,28 +223,34 @@ if __name__ == '__main__':
     pdf_paths = getPdfPaths(dataset_path + '/pdf')
 
     sub_start = 0
-    sub_end = 3000
+    sub_end = 100
     thread_number = 12
     
     annotated_tables, total = extractAnnotatedTables(dataset_path + "/FinTabNet_1.0.0_table_test.jsonl", sub_start=sub_start, sub_end=sub_end)   
     batch_size = int(total/thread_number)
     pdf_paths.sort()
 
-    tol = 20
+    tol = 30
     thread = []
     total_matches = 0
     total_cell_matches = 0
 
-    #match_list, mismatch_list, cell_match_list = test(pdf_paths, annotated_tables, tol=tol, draw=True, only_bbox=False, find_method='model-based')
-    #total_matches = len(match_list)
-    #total_cell_matches = len(cell_match_list)
-
-    with concurrent.futures.ProcessPoolExecutor(max_workers=thread_number) as executor:
-        matches = [executor.submit(test, pdf_paths, annotated_tables[i*batch_size:(i+1)*batch_size], tol=tol, draw=False, only_bbox=False, find_method='model-based') for i in range(thread_number)]
-        for m in matches:
-            match_list, mismatch_list, cell_match_list = m.result()
-            total_matches += len(match_list)
-            total_cell_matches += len(cell_match_list)
+    match_list, mismatch_list, cell_match_list = test(pdf_paths, annotated_tables, tol=tol, draw='bbox_match', only_bbox=False, find_method='model-based')
+    total_matches = len(match_list)
+    total_cell_matches = len(cell_match_list)
+    #mmlist = []
+    #mlist = []
+    #clist = []
+#
+    #with concurrent.futures.ProcessPoolExecutor(max_workers=thread_number) as executor:
+    #    matches = [executor.submit(test, pdf_paths, annotated_tables[i*batch_size:(i+1)*batch_size], tol=tol, draw='bbox_match', only_bbox=False, find_method='model-based') for i in range(thread_number)]
+    #    for m in matches:
+    #        match_list, mismatch_list, cell_match_list = m.result()
+    #        mmlist.extend(mismatch_list)
+    #        mlist.extend(match_list)
+    #        clist.extend(cell_match_list)
+    #        total_matches += len(match_list)
+    #        total_cell_matches += len(cell_match_list)
 
     q.put(True)
 

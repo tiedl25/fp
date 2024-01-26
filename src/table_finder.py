@@ -38,7 +38,7 @@ class TableFinder:
 
         return chars[len(chars)-1]['top'] if len(chars) > 0 else bbox[3]
 
-    def find_table_bottom(self, bbox, max_diff):
+    def find_table_bottom(self, bbox, max_diff, must_contain_chars=False):
         """
         Find the bottom boundary of a table in the given bounding box.
 
@@ -51,7 +51,7 @@ class TableFinder:
 
         """
         chars = sorted(self.page.crop(bbox, strict=False).chars, key=lambda e: e['bottom'])
-        chars.insert(0, {'top': bbox[1], 'bottom': bbox[1], 'text': '_'})
+        if not must_contain_chars: chars.insert(0, {'top': bbox[1], 'bottom': bbox[1], 'text': '_'})
 
         i=0
         while i < len(chars)-1:
@@ -65,7 +65,7 @@ class TableFinder:
                 i+=1
 
 
-        return chars[len(chars)-1]['bottom']
+        return chars[len(chars)-1]['bottom'] if len(chars) > 0 else bbox[1]
     
     def find_table_left(self, bbox, max_diff):
         """
@@ -370,7 +370,7 @@ class TableFinder:
         """
         mid = self.page.width/2
         objs = self.page.crop([mid-3, top, mid+3, bottom])
-        objs = objs.chars + objs.lines
+        objs = objs.chars + objs.lines + objs.rects
         return len(objs) > 0
             
     def find_tables(self, bottom_threshold=5, top_threshold=4, left_threshold=2, right_threshold=2, find_method='rule-based', image=None):
@@ -404,14 +404,19 @@ class TableFinder:
                 if top >= bottom:
                     continue
 
-                if self.one_column_layout(top+top_threshold, bottom+bottom_threshold):
-                    chars = sorted([x for x in self.page.crop([self.page.bbox[0], top, self.page.bbox[2], bottom]).chars if x['matrix'][1] == 0 and x['matrix'][2] == 0], key=lambda e: e['x0'])
+                if self.one_column_layout(top-top_threshold, bottom+bottom_threshold):
+                    #chars = sorted([x for x in self.page.crop([self.page.bbox[0], top, self.page.bbox[2], bottom]).chars if x['matrix'][1] == 0 and x['matrix'][2] == 0], key=lambda e: e['x0'])
+                    chars = sorted([x for x in self.page.chars if x['matrix'][1] == 0 and x['matrix'][2] == 0], key=lambda e: e['x0'])
                     left, right = chars[0]['x0'], chars[-1]['x1']
                 else: 
                     left = self.find_table_left([self.page.bbox[0], top, line['x0'], bottom], left_threshold)
                     right = self.find_table_right([line['x1'], top, self.page.bbox[2], bottom], right_threshold)
 
                 bbox = self.extend_table([left, top, right, bottom])
+
+                chars = sorted(self.page.crop(bbox).chars, key=lambda e: e['x0'])
+                left, right = chars[0]['x0'], chars[-1]['x1']
+                bbox[0], bbox[2] = left, right
 
                 table = {'bbox': bbox, 'lines': [line]}
 

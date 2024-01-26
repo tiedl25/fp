@@ -47,7 +47,7 @@ def extractAnnotatedTables(path, sub_start=0, sub_end=-1):
     return test_tables_grouped, total
 
 def compare_cells(table, test_table, pdf_path, t_i, page):
-    #if abs(len(table['cells']) - len(test_table['cells'])) < 20:
+    #if abs(len(table['cells']) - len(test_table['cells'])) < 10:
     #    return f"\t\t{pdf_path} Table {t_i+1}"
 #
     #return None
@@ -62,7 +62,7 @@ def compare_cells(table, test_table, pdf_path, t_i, page):
     for cell in table['cells']:
         for test_cell in test_table['cells']:
             s = SequenceMatcher(None, test_cell['text'], cell['text'])
-            if s.ratio() > 0.5:
+            if s.ratio() > 0.7:
                 matches += 1
                 break
 
@@ -71,7 +71,7 @@ def compare_cells(table, test_table, pdf_path, t_i, page):
 
     return None
 
-def test(pdf_paths, annotated_tables, draw=False, tol=5, only_bbox=False, find_method='rule-based'):
+def test(pdf_paths, annotated_tables, draw='cell_match', tol=5, only_bbox=False, find_method='rule-based'):
     i = 0
     match_list = []
     mismatch_list = []
@@ -161,7 +161,7 @@ def test(pdf_paths, annotated_tables, draw=False, tol=5, only_bbox=False, find_m
             match = False
             cell_match = False
 
-        if (draw and match and not cell_match) or (only_bbox and draw and not match):
+        if (draw=='cell_match' and match and not cell_match) or (only_bbox and draw=='cell_match' and not match):
             im = page.to_image(resolution=300)
             im2 = page.to_image(resolution=300)
             for table in test_tables:
@@ -175,17 +175,17 @@ def test(pdf_paths, annotated_tables, draw=False, tol=5, only_bbox=False, find_m
             im.save(f"img/{pdf_path.replace('/', '_')[0:-4]}_test.png")
             im2.save(f"img/{pdf_path.replace('/', '_')[0:-4]}.png")
 
-        #if draw and not match:
-        #    im = page.to_image(resolution=300)
-        #    for table in test_tables:
-        #        im.draw_rect(table['bbox'], stroke_width=0, fill=(230, 65, 67, 65)) # red for test tables
-#
-        #    for table in tables: 
-        #        im.draw_rect([table['bbox'][0], table['bbox'][1], table['bbox'][2], table['footer']], stroke_width=0)
-        #        #im.draw_hline(table['footer'])
-#
-#
-        #    im.save(f"img/{pdf_path.replace('/', '_')[0:-4]}.png")
+        if draw=='bbox_match' and not match:
+            im = page.to_image(resolution=300)
+            for table in test_tables:
+                im.draw_rect(table['bbox'], stroke_width=0, fill=(230, 65, 67, 65)) # red for test tables
+
+            for table in tables: 
+                im.draw_rect([table['bbox'][0], table['bbox'][1], table['bbox'][2], table['footer']], stroke_width=0)
+                #im.draw_hline(table['footer'])
+
+
+            im.save(f"img/{pdf_path.replace('/', '_')[0:-4]}.png")
             
         i+=1
 
@@ -220,7 +220,7 @@ if __name__ == '__main__':
     batch_size = int(total/thread_number)
     pdf_paths.sort()
 
-    tol = 20
+    tol = 30
     thread = []
     total_matches = 0
     total_cell_matches = 0
@@ -232,7 +232,7 @@ if __name__ == '__main__':
     clist = []
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=thread_number) as executor:
-        matches = [executor.submit(test, pdf_paths, annotated_tables[i*batch_size:(i+1)*batch_size], tol=tol, draw=True, only_bbox=False, find_method='rule-based') for i in range(thread_number)]
+        matches = [executor.submit(test, pdf_paths, annotated_tables[i*batch_size:(i+1)*batch_size], tol=tol, draw='bbox_match', only_bbox=False, find_method='rule-based') for i in range(thread_number)]
         for m in matches:
             match_list, mismatch_list, cell_match_list = m.result()
             mmlist.extend(mismatch_list)
@@ -248,9 +248,6 @@ if __name__ == '__main__':
     print(f"Matches: {total_matches}/{total}\t{total_matches/total*100} %")
     print(f"Cell Matches: {total_cell_matches}/{total_matches}\t{total_cell_matches/total_matches*100} %")
     print(f"Cell Matches: {total_cell_matches}/{total}\t{total_cell_matches/total*100} %")
-
-    for x in clist:
-        print(x)
 
     s1 = time.time()
     print(f"{int((s1-s0) / 60)}:{int(s1-s0) % 60} minutes")

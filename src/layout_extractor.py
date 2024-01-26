@@ -1,6 +1,7 @@
 import pdfplumber
 import copy
 import statistics
+import re
 
 if __name__ == "__main__":
     from table_finder import TableFinder
@@ -160,19 +161,35 @@ class LayoutExtractor:
         rows.append(rect) # to get the bottom and top separator
         self.row_separator = rows   
 
-    def test_footnote(self):
-        if len(self.table_lines) <= 1:
-            return
+    def find_footnote(self, x_space, symbols):
+        separator = self.row_separator.copy()
+        separator.append({'top': self.table['bbox'][3], 'bottom': self.table['bbox'][3]})
 
-        # test if the last segment is actually the footnote
-        bbox = self.clipping.bbox.copy()
-        bbox[1] = self.table_lines[-1]['bottom']
-        bbox[3] = self.table['bbox'][3]
-        c = self.clipping.crop(bbox).extract_words()
-        w = c[0]['text'][0] + c[0]['text'][2] if len(c[0]['text']) > 2 else ""
-        #test = self.find_columns(self.clipping.crop(bbox), x_space, symbols)
-        if w == '()' or c[0]['text'] == '*':#len(test) == 0:
-            self.table['footer'] = self.table_lines[-1]['bottom']
+        i=len(separator)-1
+        while i > 0:
+            bbox = self.clipping.bbox.copy()
+            bbox[1] = separator[i-1]['top']
+            bbox[3] = separator[i]['bottom']
+            if bbox[3] - bbox[1] <= 0:
+                i-=1
+                continue
+            
+            clip = self.clipping.crop(bbox)
+            cols = self.find_columns(clip, 3*x_space, symbols)
+            words = clip.extract_words()
+            #width = max([w['x1'] for w in words], default=self.clipping.bbox[2]) - min([w['x0'] for w in words], default=self.clipping.bbox[0])
+            word_indent = words[0]['x0'] - bbox[0] if len(words) > 0 else 0
+            if len(cols) == 0 and word_indent < self.clipping.width / 10:
+                self.table['footer'] = bbox[1]
+            else:
+                if len(cols) == 1 and re.search("^\(\d+\)$|^\*$|^\d+$", words[0]['text']) is not None:
+                    self.table['footer'] = bbox[1]
+                else:
+                    break
+
+            i-=1
+        
+        return
 
     def remove_unessessary_columns(self):
         self.column_separator = sorted(self.column_separator, key=lambda e: e['x0'])
@@ -197,8 +214,6 @@ class LayoutExtractor:
                 self.column_separator.pop(i+1)
 
     def find_layout(self, x_space, y_space, symbols, ignore_footnote=False):
-        #self.test_footnote()
-
         self.column_separator = []
         bbox = self.clipping.bbox.copy()
         bbox[3] = self.table['footer']
@@ -213,6 +228,8 @@ class LayoutExtractor:
         # add table lines as row separator
         self.row_separator.extend([{'x0': self.table['bbox'][0], 'x1': self.table['bbox'][2], 'width': self.table['bbox'][2] - self.table['bbox'][0], 'object_type': 'line', 'top': x['top'], 'bottom': x['bottom']} for x in self.table['lines']])
         self.row_separator = sorted(self.row_separator, key=lambda e: e['top'])
+
+        self.find_footnote(x_space=x_space, symbols=symbols)
 
         # table is separated in horizontal segments: the columns are individual for each segment (important for multi-header tables)
         # segments are defined by the top and bottom lines of the table, the header and the footer and the ruling lines above the headerline
@@ -250,7 +267,7 @@ class LayoutExtractor:
         if "column_separator" in vars(self).keys():
             vertical_lines.extend(self.column_separator)
         if "row_separator" in vars(self).keys():
-            horizontal_lines.extend(self.row_separator)
+            horizontal_lines.extend([x for x in self.row_separator if x['top'] < self.table['footer']])
 
         table_settings = {
             "vertical_strategy": "explicit",
