@@ -1,5 +1,6 @@
 import pdfplumber
 import statistics
+import itertools
 
 class TableFinder:
     def __init__(self, page, model=None) -> None:
@@ -217,6 +218,40 @@ class TableFinder:
 
         return lines
 
+    def find_lines_of_dots(self):
+        dots = [x for x in self.page.chars if x['text'] == '.']
+        #dots = sorted(dots, key=lambda e: e['x0'])
+#
+        #dots_grouped_by_y = []
+        #current_dot = dots.pop(0)
+#
+        #for dot in dots:
+        #    if dot['top'] == current_dot['top']:
+        #        dots_grouped_by_y.append(dot)
+        #        current_dot = dot
+        #    else:
+        #        dots_grouped_by_y.append([current_dot])
+        #        current_dot = dot
+
+        dots_grouped_by_y = [list(group) for key, group in itertools.groupby(sorted(dots, key=lambda e: e['top']), lambda e: e['top'])]
+        lines = []
+        current_group = None
+        for dot_group in dots_grouped_by_y:
+            for dot in dot_group:
+                if current_group == None:
+                    current_group = [dot]
+                elif current_group[-1]['x1'] < dot['x0'] < current_group[-1]['x1'] + 7:
+                    current_group.append(dot)
+                else:
+                    if len(current_group) > 3:
+                        x0 = min(current_group, key=lambda e: e['x0'])['x0']
+                        x1 = max(current_group, key=lambda e: e['x1'])['x1']
+                        lines.append({'x0': x0, 'x1': x1, 'top': current_group[0]['bottom'], 'bottom': current_group[0]['bottom'], 'width': x1 - x0, 'height': 1})
+                    current_group = [dot]
+
+        #lines = [{'x0': min(x, key=lambda e: e['x0'])['x0'], 'x1': max(x, key=lambda e: e['x1'])['x1'], 'top': x[0]['bottom'], 'bottom': x[0]['bottom'], 'width': max(x, key=lambda e: e['x1'])['x1'] - min(x, key=lambda e: e['x0'])['x0'], 'height': 1} for x in dots_grouped_by_y if len(x) > 3]
+        return lines
+
     def derive_tables(self):
         """
         Look for overlapping tables and merge them together
@@ -235,10 +270,10 @@ class TableFinder:
             table_bbox = table['bbox']
 
             #table side | bbox side
-            ll = bbox[0] < table_bbox[0] #bbox left side is on the left of the table
-            lr = bbox[2] < table_bbox[0] #bbox right side is on the left of the table
-            rr = bbox[2] > table_bbox[2] #bbox right side is on the right of the table
-            rl = bbox[0] > table_bbox[2] #bbox left side is on the right of the table
+            ll = bbox[0] + 5 < table_bbox[0] #bbox left side is on the left of the table
+            lr = bbox[2] + 5 < table_bbox[0] #bbox right side is on the left of the table
+            rr = bbox[2] - 5 > table_bbox[2] #bbox right side is on the right of the table
+            rl = bbox[0] - 5 > table_bbox[2] #bbox left side is on the right of the table
             tt = bbox[1] + 10 < table_bbox[1] #bbox top side is on top of the table
             tb = bbox[3] + 10 < table_bbox[1] #bbox bottom side is on top of the table
             bb = bbox[3] - 10 > table_bbox[3] #bbox bottom side is below the table
@@ -392,9 +427,12 @@ class TableFinder:
         line_segments = self.concat_lines(self.lines)
         self.lines = self.concat_line_segments(line_segments)
 
+        all_lines = self.find_lines_of_dots() + self.lines
+        all_lines.sort(key = lambda e: e['top'])
+
         if find_method == 'rule-based':
             bottom_threshold = self.determine_average_line_height()
-            for i, line in enumerate(self.lines):
+            for i, line in enumerate(all_lines):
                 if line['x0'] >= line['x1']:
                     continue
                 
@@ -414,6 +452,7 @@ class TableFinder:
 
                 bbox = self.extend_table([left, top, right, bottom])
 
+                # shrink the table on the left and right side
                 chars = sorted(self.page.crop(bbox).chars, key=lambda e: e['x0'])
                 left, right = chars[0]['x0'], chars[-1]['x1']
                 bbox[0], bbox[2] = left, right
