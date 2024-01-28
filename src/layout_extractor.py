@@ -175,7 +175,7 @@ class LayoutExtractor:
                 continue
             
             clip = self.clipping.crop(bbox)
-            cols = self.find_columns(clip, 3*x_space, symbols)
+            cols = self.find_columns(clip, 3*x_space, [])
             words = clip.extract_words()
             #width = max([w['x1'] for w in words], default=self.clipping.bbox[2]) - min([w['x0'] for w in words], default=self.clipping.bbox[0])
             word_indent = words[0]['x0'] - bbox[0] if len(words) > 0 else 0
@@ -190,6 +190,36 @@ class LayoutExtractor:
             i-=1
         
         return
+
+    def remove_top(self, x_space, symbols):
+        separator = self.row_separator.copy()
+        separator.insert(0, {'top': self.table['bbox'][1], 'bottom': self.table['bbox'][1]})
+
+        i=0
+        while i < len(separator)-1:
+            bbox = self.clipping.bbox.copy()
+            bbox[1] = separator[i]['bottom']
+            bbox[3] = separator[i+1]['top']
+            if bbox[3] - bbox[1] <= 0:
+                i+=1
+                continue
+            
+            clip = self.clipping.crop(bbox)
+            cols = self.find_columns(clip, 3*x_space, [])
+            words = clip.extract_words()
+            #width = max([w['x1'] for w in words], default=self.clipping.bbox[2]) - min([w['x0'] for w in words], default=self.clipping.bbox[0])
+            word_indent = words[0]['x0'] - bbox[0] if len(words) > 0 else 0
+            if len(cols) == 0 and word_indent < self.clipping.width / 10:
+                self.table['bbox'][1] = bbox[3]
+            else:
+                if len(cols) == 1 and re.search("^\(\d+\)$|^\*$|^\d+.?$", words[0]['text']) is not None:
+                    self.table['bbox'][1] = bbox[3]
+                else:
+                    break
+
+            i+=1
+        
+        return        
 
     def remove_unessessary_columns(self):
         self.column_separator = sorted(self.column_separator, key=lambda e: e['x0'])
@@ -215,11 +245,11 @@ class LayoutExtractor:
 
     def find_layout(self, x_space, y_space, symbols, ignore_footnote=False):
         self.column_separator = []
-        bbox = self.clipping.bbox.copy()
-        bbox[3] = self.table['footer']
 
         # find rows in whole table except for the footnote
-        footnote_complete, self.row_separator, self.table['header'] = self.find_rows(self.clipping.crop(bbox), y_space)
+        footnote_complete, self.row_separator, self.table['header'] = self.find_rows(self.clipping, y_space)
+        #self.remove_top(x_space=x_space, symbols=symbols)
+        #footnote_complete, self.row_separator, self.table['header'] = self.find_rows(self.clipping.crop(self.table['bbox']), y_space)
 
         if not footnote_complete and not ignore_footnote: return footnote_complete, None, None
 

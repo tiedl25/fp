@@ -154,6 +154,7 @@ class TableFinder:
 
             else:
                 if current_line['x0'] < self.page.bbox[0] or current_line['top'] < self.page.bbox[1]:
+                    current_line = line
                     continue
                 concat_line_segments.append(current_line)
                 current_line = line
@@ -197,7 +198,7 @@ class TableFinder:
 
         return concat_lines
     
-    def collapse_rects(self):
+    def collapse_rects_and_curves(self):
         """
         Collapse the rectangles in the page.
 
@@ -211,8 +212,8 @@ class TableFinder:
         """
         lines = []
 
-        for i, rect in enumerate(self.page.rects):
-            if rect['height'] < 1 and rect['fill'] == True:
+        for i, rect in enumerate(self.page.rects+self.page.curves):
+            if rect['height'] < 2 and rect['fill'] == True:
                 rect['object_type'] = "line"
                 lines.append(rect)
 
@@ -221,10 +222,10 @@ class TableFinder:
     def find_lines_of_dots(self):
         dots = [x for x in self.page.chars if x['text'] == '.']
         #dots = sorted(dots, key=lambda e: e['x0'])
-#
+        #
         #dots_grouped_by_y = []
         #current_dot = dots.pop(0)
-#
+        #
         #for dot in dots:
         #    if dot['top'] == current_dot['top']:
         #        dots_grouped_by_y.append(dot)
@@ -422,7 +423,7 @@ class TableFinder:
             list: A list of derived tables found in the document.
         """
         self.lines = [x for x in self.lines if x['x0'] != x['x1']] # remove vertical lines
-        self.lines.extend(self.collapse_rects())
+        self.lines.extend(self.collapse_rects_and_curves())
         self.lines.sort(key = lambda e: e['top'])
         line_segments = self.concat_lines(self.lines)
         self.lines = self.concat_line_segments(line_segments)

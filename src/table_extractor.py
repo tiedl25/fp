@@ -297,7 +297,7 @@ if __name__ == '__main__':
     else :
         model = None    
 
-    te = TableExtractor(path="fintabnet/pdf/AKAM/2005/page_82.pdf", separate_units=False, find_method=find_method, model=model, determine_row_space="min", max_column_space=4, max_row_space=2)
+    te = TableExtractor(path="fintabnet/pdf/DOV/2009/page_71.pdf", separate_units=False, find_method=find_method, model=model, determine_row_space="min", max_column_space=4, max_row_space=2)
     tables = te.extractTables(img_path='.')
     
     #dataframes = [te.tableToDataframe(table['pdfplumber_cells']['text']) for table in tables]
