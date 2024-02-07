@@ -1,13 +1,17 @@
 import pdfplumber
 import statistics
 import itertools
+import torch
 
 class TableFinder:
-    def __init__(self, page, model=None) -> None:
+    def __init__(self, page, model=None, image_processor=None) -> None:
         self.page = page
+        # TODO
+        #self.page.bbox = self.page.layout.bbox
         self.lines = page.lines
         self.tables = []
         self.model = model
+        self.image_processor = image_processor
 
     def find_table_top(self, bbox, max_diff, must_contain_chars=False):
         """
@@ -129,7 +133,7 @@ class TableFinder:
                 i+=1
 
 
-        return chars[len(chars)-1]['x1']
+        return chars[-1]['x1']
 
     def concat_lines(self, lst):
         """
@@ -253,7 +257,7 @@ class TableFinder:
         #lines = [{'x0': min(x, key=lambda e: e['x0'])['x0'], 'x1': max(x, key=lambda e: e['x1'])['x1'], 'top': x[0]['bottom'], 'bottom': x[0]['bottom'], 'width': max(x, key=lambda e: e['x1'])['x1'] - min(x, key=lambda e: e['x0'])['x0'], 'height': 1} for x in dots_grouped_by_y if len(x) > 3]
         return lines
 
-    def derive_tables(self):
+    def derive_tables(self, bottom_threshold=10, top_threshold=10, left_threshold=5, right_threshold=5):
         """
         Look for overlapping tables and merge them together
 
@@ -271,14 +275,14 @@ class TableFinder:
             table_bbox = table['bbox']
 
             #table side | bbox side
-            ll = bbox[0] + 5 < table_bbox[0] #bbox left side is on the left of the table
-            lr = bbox[2] + 5 < table_bbox[0] #bbox right side is on the left of the table
-            rr = bbox[2] - 5 > table_bbox[2] #bbox right side is on the right of the table
-            rl = bbox[0] - 5 > table_bbox[2] #bbox left side is on the right of the table
-            tt = bbox[1] + 10 < table_bbox[1] #bbox top side is on top of the table
-            tb = bbox[3] + 10 < table_bbox[1] #bbox bottom side is on top of the table
-            bb = bbox[3] - 10 > table_bbox[3] #bbox bottom side is below the table
-            bt = bbox[1] - 10 > table_bbox[3] #bbox top side is below the table
+            ll = bbox[0] + left_threshold < table_bbox[0] #bbox left side is on the left of the table
+            lr = bbox[2] + left_threshold < table_bbox[0] #bbox right side is on the left of the table
+            rr = bbox[2] - right_threshold > table_bbox[2] #bbox right side is on the right of the table
+            rl = bbox[0] - right_threshold > table_bbox[2] #bbox left side is on the right of the table
+            tt = bbox[1] + top_threshold < table_bbox[1] #bbox top side is on top of the table
+            tb = bbox[3] + top_threshold < table_bbox[1] #bbox bottom side is on top of the table
+            bb = bbox[3] - bottom_threshold > table_bbox[3] #bbox bottom side is below the table
+            bt = bbox[1] - bottom_threshold > table_bbox[3] #bbox top side is below the table
 
             l_inside = not (ll or rl)
             r_inside = not (lr or rr)
@@ -405,7 +409,7 @@ class TableFinder:
             bool: True if the table lies in one column, False otherwise.
         """
         mid = self.page.width/2
-        objs = self.page.crop([mid-3, top, mid+3, bottom])
+        objs = self.page.crop([mid-3, top if top > self.page.bbox[1] else self.page.bbox[1], mid+3, bottom if bottom < self.page.bbox[3] else self.page.bbox[3]], strict=False)
         objs = objs.chars + objs.lines + objs.rects
         return len(objs) > 0
             
@@ -422,7 +426,7 @@ class TableFinder:
         Returns:
             list: A list of derived tables found in the document.
         """
-        self.lines = [x for x in self.lines if x['x0'] != x['x1']] # remove vertical lines
+        self.lines = [x for x in self.lines if x['x0'] != x['x1'] and x['top'] >= self.page.bbox[1] and x['bottom'] <= self.page.bbox[3]] # remove vertical lines
         self.lines.extend(self.collapse_rects_and_curves())
         self.lines.sort(key = lambda e: e['top'])
         line_segments = self.concat_lines(self.lines)
@@ -445,7 +449,7 @@ class TableFinder:
 
                 if self.one_column_layout(top-top_threshold, bottom+bottom_threshold):
                     #chars = sorted([x for x in self.page.crop([self.page.bbox[0], top, self.page.bbox[2], bottom]).chars if x['matrix'][1] == 0 and x['matrix'][2] == 0], key=lambda e: e['x0'])
-                    chars = sorted([x for x in self.page.chars if x['matrix'][1] == 0 and x['matrix'][2] == 0], key=lambda e: e['x0'])
+                    chars = sorted([x for x in self.page.crop(self.page.bbox).chars if x['matrix'][1] == 0 and x['matrix'][2] == 0], key=lambda e: e['x0'])
                     left, right = chars[0]['x0'], chars[-1]['x1']
                 else: 
                     left = self.find_table_left([self.page.bbox[0], top, line['x0'], bottom], left_threshold)
@@ -490,7 +494,33 @@ class TableFinder:
                 bbox = self.extend_table(top_threshold=2, bottom_threshold=2, bbox=[x/image.scale for x in table.xyxy.tolist()[0]]) # apply image scale and extend bbox
                 derived_tables.append({'bbox': bbox, 'lines': self.lines, 'settings': {}, 'cells': []})
                 derived_tables[t_i]['footer'] = derived_tables[t_i]['bbox'][3]
-                derived_tables[t_i]['header'] = derived_tables[t_i]['bbox'][1]        
+                derived_tables[t_i]['header'] = derived_tables[t_i]['bbox'][1]
+
+        elif find_method == 'microsoft' and self.model is not None and image is not None and self.image_processor is not None:
+            inputs = self.image_processor(images=image.original, return_tensors="pt")
+            outputs = self.model(**inputs)
+
+            # convert outputs (bounding boxes and class logits) to Pascal VOC format (xmin, ymin, xmax, ymax)
+            target_sizes = torch.tensor([image.original.size[::-1]])
+            results = self.image_processor.post_process_object_detection(outputs, threshold=0.7, target_sizes=target_sizes)[0]
+
+            boxes = []
+            #derived_tables = []
+            for score, label, box in zip(results["scores"], results["labels"], results["boxes"]):
+                bbox = [round(i/image.scale, 2) for i in box.tolist()] # reorder and scale
+                bbox = self.extend_table(top_threshold=2, bottom_threshold=2, bbox=bbox) # extend
+
+                bbox[0] = min(self.page.crop(bbox).chars, key=lambda e: e['x0'])['x0']
+                bbox[1] = min(self.page.crop(bbox).chars, key=lambda e: e['top'])['top']
+                bbox[2] = max(self.page.crop(bbox).chars, key=lambda e: e['x1'])['x1']
+                bbox[3] = max(self.page.crop(bbox).chars, key=lambda e: e['bottom'])['bottom']
+
+                table = {'bbox': bbox, 'lines': self.lines, 'settings': {}, 'cells': []}
+                table['footer'] = table['bbox'][3]
+                table['header'] = table['bbox'][1]
+                self.tables.append(table)
+
+            derived_tables = self.tables
             
         # Make sure that all the lines are within the table
         for t in derived_tables:

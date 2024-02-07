@@ -6,6 +6,8 @@ import os
 
 from ultralyticsplus import YOLO, render_result
 
+from transformers import AutoImageProcessor, TableTransformerForObjectDetection
+
 if __name__ == '__main__':  
     from table_finder import TableFinder
     from layout_extractor import LayoutExtractor
@@ -16,13 +18,14 @@ else:
     except: from layout_extractor import LayoutExtractor
 
 class TableExtractor:
-    def __init__(self, path, separate_units=False, find_method='rule-based', model=None, determine_row_space="min", max_column_space=5, max_row_space=2):
+    def __init__(self, path, separate_units=False, find_method='rule-based', model=None, image_processor=None, determine_row_space="min", max_column_space=5, max_row_space=2):
         self.path = path
         pdf = pdfplumber.open(path)
         self.pages = pdf.pages
         self.separate_units = separate_units
         self.find_method = find_method
         self.model = model
+        self.image_processor = image_processor
         self.max_columns_space = max_column_space
         self.max_row_space = max_row_space
         self.determine_row_space = determine_row_space
@@ -157,12 +160,12 @@ class TableExtractor:
                 return None
 
         # model-based
-        elif self.find_method == 'model-based':
+        elif self.find_method in ['model-based', 'microsoft']:
             # get table bbox if none is provided
             if table == None:
                 page = copy.copy(self.pages[0])
 
-                tf = TableFinder(page, model=self.model)
+                tf = TableFinder(page, model=self.model, image_processor=self.image_processor)
                 tables = tf.find_tables(find_method=self.find_method, image=image if image is not None else page.to_image(resolution=300))
 
                 if table_index >= len(tables):
@@ -227,10 +230,10 @@ class TableExtractor:
         extracted_tables = []
 
         page = self.pages.copy()[page_index]
-        tf = TableFinder(page, model=self.model)
+        tf = TableFinder(page, model=self.model, image_processor=self.image_processor)
 
         image=None
-        if img_path is not None or self.find_method == 'model-based':
+        if img_path is not None or self.find_method in ['model-based', 'microsoft']:
             image = page.to_image(resolution=300)
 
         tables_found = tf.find_tables(find_method=self.find_method, image=image)
@@ -245,9 +248,9 @@ class TableExtractor:
                 continue
 
             #image.draw_hlines([x['top'] for x in table['lines']], stroke_width=3, stroke=(230, 65, 67, 65)) # redraw existing lines
-            #image.debug_tablefinder(table['settings'])
+            image.debug_tablefinder(table['settings'])
             #image.draw_rect(table['bbox'])
-            image.draw_rects(x['bbox'] for x in table['cells'])
+            #image.draw_rects(x['bbox'] for x in table['cells'])
             image.draw_hline(table['footer'])
             image.draw_hline(table['header'])
             #image.draw_vline(page.width/2)
@@ -294,10 +297,16 @@ if __name__ == '__main__':
         model.overrides['iou'] = 0.45  # NMS IoU threshold
         model.overrides['agnostic_nms'] = False  # NMS class-agnostic
         model.overrides['max_det'] = 10  # maximum number of detections per image
+
+        image_processor = None
+    elif find_method == 'microsoft':
+        image_processor = AutoImageProcessor.from_pretrained("microsoft/table-transformer-detection")
+        model = TableTransformerForObjectDetection.from_pretrained("microsoft/table-transformer-detection")
     else :
         model = None    
+        image_processor = None
 
-    te = TableExtractor(path="fintabnet/pdf/DOV/2009/page_71.pdf", separate_units=False, find_method=find_method, model=model, determine_row_space="min", max_column_space=4, max_row_space=2)
+    te = TableExtractor(path="fintabnet/pdf/IT/2010/page_114.pdf", separate_units=False, find_method=find_method, model=model, image_processor=image_processor, determine_row_space="min", max_column_space=4, max_row_space=2)
     tables = te.extractTables(img_path='.')
     
     #dataframes = [te.tableToDataframe(table['pdfplumber_cells']['text']) for table in tables]
