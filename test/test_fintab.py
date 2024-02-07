@@ -17,6 +17,9 @@ import time
 import shutil
 import sys
 import multiprocessing
+import copy
+
+from transformers import AutoImageProcessor, TableTransformerForObjectDetection
 
 def getPdfPaths(path):
     pdfs = []
@@ -76,14 +79,15 @@ def restructure_cells(cells, page):
     
     return restructured_cells
 
-def proc(dataset_path, pdf_path, test_tables, draw, tol, find_method):
+def proc(dataset_path, pdf_path, test_tables, draw, tol, find_method, model=None, image_processor=None):
     match_list = []
     mismatch_list = []
     cell_match_list = []
     total_found_tables = 0
 
-    tableExtractor = TableExtractor(path=f"{dataset_path}/pdf/{pdf_path}", separate_units=False, find_method=find_method, determine_row_space="min", max_column_space=4, max_row_space=2)
-    tables = tableExtractor.extractTables(page_index=0) # all pdfs contain only one page
+    tableExtractor = TableExtractor(path=f"{dataset_path}/pdf/{pdf_path}", separate_units=False, find_method=find_method, model=model, image_processor=image_processor, determine_row_space="min", max_column_space=4, max_row_space=2)
+    try: tables = tableExtractor.extractTables(page_index=0) # all pdfs contain only one page
+    except Exception as e: print(f"Error in {pdf_path}: {e}");return [0,0,0,0]
     page = tableExtractor.pages[0]
 
     # reorder table and bbox coordinates to match the structure of pdfplumber
@@ -138,12 +142,26 @@ def proc(dataset_path, pdf_path, test_tables, draw, tol, find_method):
 
     return [len(match_list), len(mismatch_list), len(cell_match_list), total_found_tables]
 
-def test_parallel(pdf_paths, annotated_tables, draw='cell_match', tol=5, find_method='rule-based'):
+def test_parallel(pdf_paths, annotated_tables, draw='cell_match', tol=5, find_method='rule-based', thread_number=1):
+    if find_method == 'model-based':
+        # load model
+        model = YOLO('keremberke/yolov8s-table-extraction')
+
+        # set model parameters
+        model.overrides['conf'] = 0.25  # NMS confidence threshold
+        model.overrides['iou'] = 0.45  # NMS IoU threshold
+        model.overrides['agnostic_nms'] = False  # NMS class-agnostic
+        model.overrides['max_det'] = 1000  # maximum number of detections per image
+        image_processor = None
+    elif find_method == 'microsoft':
+        image_processor = AutoImageProcessor.from_pretrained("microsoft/table-transformer-detection")
+        model = TableTransformerForObjectDetection.from_pretrained("microsoft/table-transformer-detection")
+
     i = 0
 
     results = []
 
-    with concurrent.futures.ProcessPoolExecutor(max_workers=10, max_tasks_per_child=10) as executor:
+    with concurrent.futures.ProcessPoolExecutor(max_workers=thread_number if find_method == 'rule-based' else 1, max_tasks_per_child=10 if find_method == 'rule-based' else None) as executor:
 
         for pdf_path in pdf_paths:
             if i >= len(annotated_tables):
@@ -156,7 +174,8 @@ def test_parallel(pdf_paths, annotated_tables, draw='cell_match', tol=5, find_me
             if pdf_path < annotated_tables[i]['filename']:
                 continue
 
-            results.append(executor.submit(proc, dataset_path, pdf_path, annotated_tables[i]['tables'], draw, tol, find_method))
+            if find_method == 'rule-based': results.append(executor.submit(proc, dataset_path, pdf_path, annotated_tables[i]['tables'], draw, tol, find_method))
+            else: results.append(proc(dataset_path, pdf_path, annotated_tables[i]['tables'], draw, tol, find_method, model, image_processor))
             i+=1
         
         total_matches = 0
@@ -165,13 +184,11 @@ def test_parallel(pdf_paths, annotated_tables, draw='cell_match', tol=5, find_me
         total_found_tables = 0
 
         for f in results:
-            match_list, mismatch_list, cell_match_list, tft = f.result()
+            match_list, mismatch_list, cell_match_list, tft = f.result() if find_method == 'rule-based' else f
             total_matches += match_list
             total_mismatches += mismatch_list
             total_cell_matches += cell_match_list
             total_found_tables += tft
-
-        print('Fini')
 
         return total_matches, total_mismatches, total_cell_matches, total_found_tables
                 
@@ -216,10 +233,12 @@ if __name__ == '__main__':
     pdf_paths = getPdfPaths(dataset_path + '/pdf')
 
     sub_start = 0
-    sub_end = -1
+    sub_end = 10000
     thread_number = 10
+
+    find_method = 'rule-based'
     
-    annotated_tables, total = extractAnnotatedTables(dataset_path + "/FinTabNet_1.0.0_table_test.jsonl", sub_start=sub_start, sub_end=sub_end)   
+    annotated_tables, total = extractAnnotatedTables(dataset_path + "/all_tables.jsonl", sub_start=sub_start, sub_end=sub_end)   
     batch_size = int(total/thread_number)
     pdf_paths.sort()
 
@@ -230,7 +249,7 @@ if __name__ == '__main__':
 
     tol = 30
     
-    total_matches, total_mismatches, total_cell_matches, total_found_tables = test_parallel(pdf_paths, annotated_tables, draw=False, tol=tol, find_method='rule-based')
+    total_matches, total_mismatches, total_cell_matches, total_found_tables = test_parallel(pdf_paths, annotated_tables, draw=False, tol=tol, find_method=find_method, thread_number=thread_number)
 
     q.put(True)
 

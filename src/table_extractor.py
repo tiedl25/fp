@@ -248,8 +248,8 @@ class TableExtractor:
                 continue
 
             #image.draw_hlines([x['top'] for x in table['lines']], stroke_width=3, stroke=(230, 65, 67, 65)) # redraw existing lines
-            image.debug_tablefinder(table['settings'])
-            #image.draw_rect(table['bbox'])
+            #image.debug_tablefinder(table['settings'])
+            image.draw_rect(table['bbox'])
             #image.draw_rects(x['bbox'] for x in table['cells'])
             image.draw_hline(table['footer'])
             image.draw_hline(table['header'])
@@ -306,7 +306,7 @@ if __name__ == '__main__':
         model = None    
         image_processor = None
 
-    te = TableExtractor(path="fintabnet/pdf/IT/2010/page_114.pdf", separate_units=False, find_method=find_method, model=model, image_processor=image_processor, determine_row_space="min", max_column_space=4, max_row_space=2)
+    te = TableExtractor(path="fintabnet/pdf/A/2007/page_71.pdf", separate_units=False, find_method=find_method, model=model, image_processor=image_processor, determine_row_space="min", max_column_space=4, max_row_space=2)
     tables = te.extractTables(img_path='.')
     
     #dataframes = [te.tableToDataframe(table['pdfplumber_cells']['text']) for table in tables]

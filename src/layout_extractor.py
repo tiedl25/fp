@@ -121,7 +121,10 @@ class LayoutExtractor:
         bbox[3] = self.table['footer']
         self.clipping = self.clipping.crop(bbox)
 
-        return footnote_complete, separator, header_separator if header_separator is not None else self.table['bbox'][1]
+        if header_separator is None or header_separator - clipping.bbox[1] > clipping.height * 0.5:
+            header_separator = self.table_lines[0]['top'] if len(self.table_lines) > 0 else clipping.bbox[1]
+
+        return footnote_complete, separator, header_separator
     
     def find_unit_column(self, char):
         '''
@@ -162,7 +165,7 @@ class LayoutExtractor:
         self.row_separator = rows   
 
     def find_footnote(self, x_space, symbols):
-        separator = self.row_separator.copy()
+        separator = [x for x in self.row_separator if x['top'] > self.table['bbox'][1] and x['bottom'] < self.table['bbox'][3]]
         separator.append({'top': self.table['bbox'][3], 'bottom': self.table['bbox'][3]})
 
         i=len(separator)-1
@@ -213,7 +216,7 @@ class LayoutExtractor:
                 self.table['bbox'][1] = bbox[3]
             else:
                 if len(cols) == 1 and re.search("^\(\d+\)$|^\*$|^\d+.?$", words[0]['text']) is not None:
-                    self.table['bbox'][1] = bbox[3]
+                    self.table['bbox'][1] = bbox[3]# if bbox[3] < self.table_lines[0]['top'] else self.table_lines[0]['top']
                 else:
                     break
 

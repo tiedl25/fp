@@ -115,7 +115,7 @@ class TableFinder:
         Returns:
             int: The x-coordinate of the rightmost position of the table.
         """
-        if bbox[2] == bbox[0]:
+        if bbox[2] <= bbox[0]:
             return self.page.bbox[2]
 
         chars = sorted(self.page.crop(bbox).chars, key=lambda e: e['x0'])
