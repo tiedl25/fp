@@ -1,6 +1,7 @@
 import pdfplumber
 import copy
 import statistics
+import numpy as np
 import re
 
 if __name__ == "__main__":
@@ -178,14 +179,23 @@ class LayoutExtractor:
                 continue
             
             clip = self.clipping.crop(bbox)
-            cols = self.find_columns(clip, 3*x_space, [])
+            cols = self.find_columns(clip, 2*x_space, [])
             words = clip.extract_words()
             #width = max([w['x1'] for w in words], default=self.clipping.bbox[2]) - min([w['x0'] for w in words], default=self.clipping.bbox[0])
-            word_indent = words[0]['x0'] - bbox[0] if len(words) > 0 else 0
-            if len(cols) == 0 and word_indent < self.clipping.width / 10:
-                self.table['footer'] = bbox[1]
+            leading_space = words[0]['x0'] - bbox[0] if len(words) > 0 else self.clipping.width
+            trailing_space = bbox[2] - words[-1]['x1'] if len(words) > 0 else self.clipping.width
+
+            # remove single lines within first 10% of table width
+            if len(cols) == 0 and leading_space < self.clipping.width * 0.1:
+                self.table['bbox'][3] = bbox[1]
+                if self.table['footer'] > bbox[1]: self.table['footer'] = bbox[1]
+            # remove centered lines
+            elif len(cols) == 0 and np.isclose(leading_space, trailing_space, 0.5) and leading_space != self.clipping.width:
+                self.table['bbox'][3] = bbox[1]
+                if self.table['footer'] > bbox[1]: self.table['footer'] = bbox[1] 
+            # remove footnotes -> # or (#) or #. or #) or *
             else:
-                if len(cols) == 1 and re.search("^\(\d+\)$|^\*$|^\d+$", words[0]['text']) is not None:
+                if len(cols) == 1 and leading_space < self.clipping.width * 0.1 and re.search("^\(\d+\)$|^\*$|^\d+\.$|^\d+\)$|^\d+$", words[0]['text']) is not None:
                     self.table['footer'] = bbox[1]
                 else:
                     break
