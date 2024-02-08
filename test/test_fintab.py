@@ -2,24 +2,20 @@
 import time
 import __init__
 from src.table_extractor import TableExtractor
-from src.table_finder import TableFinder
 
 from difflib import SequenceMatcher
 
 import numpy as np
 import os
 import json
-import pdfplumber
 import concurrent.futures
 from threading import Thread
 from queue import Queue
 import time
 import shutil
-import sys
-import multiprocessing
-import copy
 
 from transformers import AutoImageProcessor, TableTransformerForObjectDetection
+from ultralyticsplus import YOLO, render_result
 
 def getPdfPaths(path):
     pdfs = []
@@ -58,11 +54,17 @@ def compare_cells(table, test_table, pdf_path, t_i, page):
     for cell in table['cells']:
         for test_cell in test_table['cells']:
             s = SequenceMatcher(None, test_cell['text'], cell['text'])
-            if s.ratio() > 0.7:
+            if s.ratio() > 0.9:
                 matches += 1
                 break
 
-    if matches > len(test_table['cells']) - 5:
+    precision = matches / len(table['cells'])
+    recall = matches / len(test_table['cells'])
+    f1 = (2*precision*recall)/(precision+recall)
+    #if matches > len(test_table['cells']) - 5:
+    #    return f"\t\t{pdf_path} Table {t_i+1}"
+    
+    if f1 > 0.7:
         return f"\t\t{pdf_path} Table {t_i+1}"
 
     return None
@@ -121,11 +123,11 @@ def proc(dataset_path, pdf_path, test_tables, draw, tol, find_method, model=None
         im2 = page.to_image(resolution=300)
         for table in test_tables:
             im.draw_rect(table['bbox'], stroke_width=0, fill=(230, 65, 67, 65)) # red for test tables
-            if not only_bbox: im.draw_rects([x['bbox'] for x in table['cells']], stroke_width=0, fill=(230, 65, 67, 65))
+            im.draw_rects([x['bbox'] for x in table['cells']], stroke_width=0, fill=(230, 65, 67, 65))
 
         for table in tables: 
             im2.draw_rect(table['bbox'], stroke_width=0) # [table['bbox'][0], table['header'], table['bbox'][2], table['footer']], stroke_width=0)
-            if not only_bbox: im2.draw_rects([x['bbox'] for x in table['cells']])
+            im2.draw_rects([x['bbox'] for x in table['cells']])
 
         im.save(f"img/{pdf_path.replace('/', '_')[0:-4]}_test.png")
         im2.save(f"img/{pdf_path.replace('/', '_')[0:-4]}.png")
@@ -233,12 +235,12 @@ if __name__ == '__main__':
     pdf_paths = getPdfPaths(dataset_path + '/pdf')
 
     sub_start = 0
-    sub_end = 10000
-    thread_number = 10
+    sub_end = 100
+    thread_number = 4
 
     find_method = 'rule-based'
     
-    annotated_tables, total = extractAnnotatedTables(dataset_path + "/all_tables.jsonl", sub_start=sub_start, sub_end=sub_end)   
+    annotated_tables, total = extractAnnotatedTables(dataset_path + "/FinTabNet_1.0.0_table_test.jsonl", sub_start=sub_start, sub_end=sub_end)   
     batch_size = int(total/thread_number)
     pdf_paths.sort()
 
@@ -249,7 +251,7 @@ if __name__ == '__main__':
 
     tol = 30
     
-    total_matches, total_mismatches, total_cell_matches, total_found_tables = test_parallel(pdf_paths, annotated_tables, draw=False, tol=tol, find_method=find_method, thread_number=thread_number)
+    total_matches, total_mismatches, total_cell_matches, total_found_tables = test_parallel(pdf_paths, annotated_tables, draw='cell_match', tol=tol, find_method=find_method, thread_number=thread_number)
 
     q.put(True)
 

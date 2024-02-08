@@ -66,6 +66,14 @@ Remove dots and spaces and then shrink extracted cells to the minimum bounding b
 #### Page Layout for table width
 Increase the table width if the page layout indicates a one column page. At the height of the table mid of the page is scanned for intersecting objects. If they exist a one column page is assumed but at least a table that takes the whole width of the layout.
 
+
+## Testing and Evaluation
+The test_fintab.py script evaluates if the tables being detected in a pdf correspond to the tables in the fintabnet dataset. Both the custom table detection and microsofts table detection were tested. 
+For every detected table a similar table in fintabnet is looked for (threshold 30). That means, the differences of each side in total are required to be less than 30. If that's the case, the table cells are compared. Matching cells are cells tested with the use of the SequenceMatcher class (difflib library). If there matching ratio is greater than 0.9, they are defined similar enough. If the f1 score is greater than 0.7 the cell structure is considered equal enough.
+
+It is important to know that the cells aren't always correctly or consistently annotated in the dataset (personal observations). Sometimes cells consist of multiple text-lines which does make sense but sometimes they are split into multiple cells but would make sense to merge them.
+
+
 ## Problems
 ### False positive
 #### Lines
