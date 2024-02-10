@@ -12,10 +12,12 @@ The python package pdfplumber is used for line extraction.
 The number of lines found in the tables is often higher, than the number of lines visually present in the pdf. The first consideration was that dashed lines are presented with multiple small lines, but instead many long lines are separated into multiple parts, partly representing the size of a column. In the end it didn't help for cell detection because it was very inconsistent. Lines are concatenated based on their distance to the top of the page. The difference on the x-axis is not taken into consideration because, it gives better results for the table finding process per se. Nevertheless the information about the different line segments (x-difference is important) is also stored
 
 #### Lines that aren't lines
-Some lines are not detected because they show up as filled rectangles with very little height. Those are also considered as lines. In some pdfs it was also helpful to consider dot sequences as lines.
+Some lines are not detected by pdfplumber because they show up as filled rectangles with very little height. They are also considered for table detection. For some pdfs it was also helpful to consider dot sequences as lines.
+
+<img src="assets/dot_lines.png" width="300" />
 
 #### Getting the bounding box
-Each ruling line represents at first a table and is it's anker point. Starting from there, two bounding boxes are created, one above the line and one below. They are open to the top or bottom respectively. The left and right border are represented by two horizontal lines. The distance to the left side of the page is the start or end point of the ruling line.
+Each ruling line represents a new table a table and is it's anker point. Starting from there, two bounding boxes are created, one above the line and one below. They are open to the top or bottom respectively. The left and right border are represented by two horizontal lines. The distance to the left side of the page is the start or end point of the ruling line.
 The next step is to sort the characters in each bounding box by their distance to the top of the page. If the y-difference between two characters is greater than a specified value, a new top or bottom border is found. 
 With this new bounding box the same process is repeated for the left and right side. 
 The resulting bounding boxes are compared to find overlapping tables. All overlapping tables are merged adjusting the bounding box. Once again the process of extending the bounding box is repeated for each side.
@@ -25,12 +27,14 @@ The resulting bounding boxes are compared to find overlapping tables. All overla
 
 #### Page Layout
 If it is detected, that the page has a single column layout, the threshold for the left and right is ignored and instead the most left and right characters are used as border for the table. Characters that are rotated, which can be obtained with their matrix that pdfplumber provides, are ignored. The following picture shows an example that demonstrates the necessity. The most right character would be one of the characters inside the black box, which would break the layout detection.
-A page is considered as one-column page if characters and lines can be found within the middle +/-3 of the page. However there are also tables in a two column layout that have tables spread over both columns or a centered title. To reliable detect also those tables, the cropping box for the middle of the table is restricted to be at the height of the table.
+A page is considered as one-column page if characters and lines can be found in the middle of the page. Two cases are considered:
+    + The object height of each object found within the bounding box (mid, top, mid+3, bottom) is summed up. If this height is greater than 30% of the page height we consider it a one-column layout
+    + The bounding box is set to (mid, top of table, mid+3, bottom of table). If any characters or lines are found, the page is also considered a one-column page.
 
 <img src="assets/one_column_layout.png" width="600" />
 
 ### Model-based Approach
-For comparison and better results two different machine-learning models are used. yolov8s-table-extraction and microsoft table-detection. The settings for the microsofts table-detection are slightly altered to recognize more tables with the cost of a little more inacuracy. The default threshold value is 0.9, but with that a lot of tables aren't detected. The new threshold is 0.7. Overall Microsofts model gives better results. Both approaches are implemented within the table detection class and the user can choose what method should be used. The image data both models need can also be accessed via pdfplumber.
+For comparison and better results two different machine-learning models are used. yolov8s-table-extraction and microsoft table-detection. The settings for the microsofts table-detection are slightly altered to recognize more tables with the cost of a little more inacuracy. The default threshold value is 0.9, but with that a lot of tables aren't detected. With a threshold value of 0.5 a lot more tables are detected but they sometimes have to wide boundaries, especially to the top and bottom. However this can be compensated within the table layout detection. Overall Microsofts model gives better results. Both approaches are implemented within the table detection class and the user can choose what method should be used. The image data both models need can also be accessed via pdfplumber.
 
 ## 1.2. Layou detection
 ### pdfplumber table extraction
@@ -43,7 +47,7 @@ This is a custom approach to detect the table layout. In the end it comes down t
 The very basic decision criteria for the separators is the x-distance between to characters for vertical and the y-distance for horizontal lines respectively. For both axis a threshold can be set. The default settings are x=5, y=2. Unfortunately there are also a ton of edge cases.
 
 #### Average line space
-To further improve the row extraction, the line spacing is used. Line spacing is calculated as the y-distance between 2 characters. By skipping negative values, characters within one text line are ignored. The average line spacing is calculated with the mode() function of the statistics library, however it turned out, that the minimum line spacing (staticstics.min()) gives overall better results. The user can change this and also set a custom value.
+To further improve the row extraction, the line spacing is used. Line spacing is calculated as the y-distance between 2 characters. By skipping negative values, characters one the same text line are ignored. The average line spacing is calculated with the mode() function of the statistics library, however it turned out, that the minimum line spacing (staticstics.min()) gives overall better results. The user can change this and also set a custom value.
 
 <img src="assets/font_criteria.png" width="300" />
 
@@ -63,10 +67,12 @@ Other lines that should't be part of the table are lines with no vertical divide
 
 #### Header
 Unfortunately the ruling lines are rather useless for consistent header extraction. 
-The header separator, is set to be the first occurrence of a font-change between two characters, assuming they are sorted from top to bottom. If there is no font change within the first 30% of the tables height, the first ruling line is used. 
-To correctly recognize multi header tables, the header is divided into multiple horizontal segments based on the row separators. Each row is independently scanned for 
+The header separator, is set to be the first occurrence of a font-change between two characters, assuming they are sorted from top to bottom. If there is no font change within the first 30% of the tables height, the first ruling line wider than 30% of the table width is used. These values are based on observations.
 
 <img src="assets/header_footer.png" width="600" />
+
+#### Column separation with header line
+To correctly recognize multi header tables, the header is divided into multiple horizontal segments according to the rows; the rest of the table (body) is also added as one segment. Each segment is independently scanned for columns.
 
 #### Shrink Cells
 Remove dots and spaces and then shrink extracted cells to the minimum bounding box.
@@ -84,7 +90,7 @@ It is important to know that the cells aren't always correctly or consistently a
 ## Problems
 ### False positive
 #### Lines
-<img src="assets/table_not_separated.png" />
+<img src="assets/table_not_separated.png" width="600" />
 
 ### Table Object
 Dictionary:
