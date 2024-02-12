@@ -20,38 +20,55 @@ class LayoutExtractor:
         self.table_lines = sorted(self.table['lines'], key=lambda e: e['top'])
         self.separate_units = separate_units
 
-    def test_table_lines(self, x, top, bottom):
-        line_bbox = self.clipping.bbox.copy()
-        line_bbox[0] = x-0.5
-        line_bbox[2] = x+0.5
-        line_bbox[3] = top
-        chars_intersect = self.clipping.crop(line_bbox).chars
+    def extend_top_of_column(self, x, top, bottom):
+        """
+        Check if the top of the column can be extended. There shouldn't be any characters or ruling lines above the column separator.
 
+        Parameters:
+        - self: the object itself
+        - x: x coordinate of the column separator
+        - top: top of the row
+        - bottom: bottom of the row
+
+        Returns:
+        - The new top of the row
+        """
+        # return if this is the top row of the table
+        if top == self.clipping.bbox[1]:
+            return top
+
+        # get the bounding box of the separator with the given x coordinate, that lies above the row
+        bbox_above_row = self.clipping.bbox.copy()
+        bbox_above_row[0] = x-1
+        bbox_above_row[2] = x+1
+        bbox_above_row[3] = top
+        intersecting_chars = self.clipping.crop(bbox_above_row).chars
+
+        # get all ruling lines that are above the headerline and the bottom of the row
         t_lines = [t_line for t_line in self.table_lines if t_line['top'] < self.table['header']-2 and 
             t_line['top'] < bottom and
             t_line['width'] < self.clipping.width * 0.9 and 
             t_line['x0'] <= x <= t_line['x1']]
 
-        if len(t_lines) > 0 and len(chars_intersect) > 0:
-            return t_lines[-1]['bottom'] if t_lines[-1]['bottom'] > chars_intersect[-1]['bottom'] else chars_intersect[-1]['bottom']
-        
-        if len(chars_intersect) > 0:
-            return chars_intersect[-1]['bottom']
-
-        if len(t_lines) > 0:
+        # return the bottom of the lowest intersecting character or ruling line
+        if len(t_lines) > 0 and len(intersecting_chars) > 0:
+            return t_lines[-1]['bottom'] if t_lines[-1]['bottom'] > intersecting_chars[-1]['bottom'] else intersecting_chars[-1]['bottom']
+        elif len(intersecting_chars) > 0:
+            return intersecting_chars[-1]['bottom']
+        elif len(t_lines) > 0:
             return t_lines[-1]['bottom']
         
+        # return the top of the table if nothing is intersecting
         return self.clipping.bbox[1]
 
-    def find_columns(self, clipping, max_diff, special_symbols, body=True):
+    def find_columns(self, clipping, max_diff, special_symbols=[' ', '.', '%', '$', '(cid:127)']):
         '''
             Define new column separator if the vertical distance between two characters is greater than max_diff or if the font changes.
             The headerline has often also another font, that creates problems with multiple column dividers where they not belong. 
             The font change is therefore only considered a column divider, if the distance to the next character is greater than 1.
             For special characters it also creates separate columns, defined by a rectangle.
         '''
-        chars = sorted(clipping.chars, key=lambda e: e['x0'])
-        chars = [char for char in chars if char['text']  not in [' ', '.', '%', '$']]
+        chars = [char for char in sorted(clipping.chars, key=lambda e: e['x0']) if char['text']  not in special_symbols]
         separator = []
 
         for i in range(len(chars)-1):
@@ -60,13 +77,14 @@ class LayoutExtractor:
 
             if diff > max_diff or (diff > 3 and char['fontname'] != chars[i]['fontname']):
                 
-                x = char['x0']-(diff/2)#char['x0']-2
+                separator_x = char['x0']-(diff/2)
 
                 bottom = clipping.bbox[3]
 
-                top = self.test_table_lines(x, clipping.bbox[1], clipping.bbox[3]) if body and clipping.bbox[1] != self.clipping.bbox[1] else clipping.bbox[1]
+                # test table lines if they are above the headerline
+                top = self.extend_top_of_column(separator_x, clipping.bbox[1], clipping.bbox[3])
 
-                separator.append({'x0': x, 'top': top, 'x1': x, 'bottom': bottom, 'object_type': 'line', 'height': bottom-top})
+                separator.append({'x0': separator_x, 'top': top, 'x1': separator_x, 'bottom': bottom, 'object_type': 'line', 'height': bottom-top})
 
             # special characters can be defined such as $ or % that are treated as separate columns
             #if self.separate_units and (chars[0]['text'] in special_symbols or char['text'] in special_symbols):
@@ -81,51 +99,32 @@ class LayoutExtractor:
             Define new row separator if the horizontal distance between two characters is greater than max_diff. 
             Also detect, if a footnote exists and thus separate it from the rest of the table.
         '''
-        chars = sorted(clipping.chars, key=lambda e: e['top'])
-        chars = [char for char in chars if char['text'] != ' ']
+        chars = [char for char in sorted(clipping.chars, key=lambda e: e['top']) if char['text'] != ' ']
         separator = []
-        footnote_complete = None
-        footnote_separator = []
         header_separator = None
 
         for i in range(len(chars)-1):
             diff = chars[i+1]['top'] - chars[i]['bottom']
             avg = (chars[i]['bottom'] + chars[i+1]['top']) / 2
 
-            if diff >= max_diff:
+            if diff > max_diff:
                 left = self.table['bbox'][0]
                 right = self.table['bbox'][2]
                 line = {'x0': left, 'top': avg, 'x1': right, 'bottom': avg, 'object_type': 'line', 'width': right-left}
-                footnote_separator.append(line) if footnote_complete else separator.append(line)
+                separator.append(line)
 
             # separate header if font changes for the first time
             if chars[i+1]['fontname'] != chars[i]['fontname'] and header_separator is None:
                 header_separator = avg if diff > 0 else chars[i]['top']#self.table['bbox'][1]
 
-            # separate footer
-            #if chars[i+1]['size'] != chars[i]['size']:
-            #    if diff < 0: # footnote index as superscript
-            #        self.table['footer'] = self.table['bbox'][3]
-            #    else: # probably actual footnote
-            #        self.table['footer'] = chars[i]['bottom']
-            #        separator.extend(footnote_separator)
-            #    footnote_complete = not footnote_complete
-            
-        if footnote_complete == None: 
-            separator.extend(footnote_separator)
-            footnote_complete = True
+        if header_separator is None or header_separator - clipping.bbox[1] > clipping.height * 0.9:
+            header_separator = max([x for x in self.table_lines if "dot_line" not in x.keys()], key=lambda e: e['width'], default={'width': clipping.width, 'top':clipping.bbox[1]})
+            if header_separator['width'] < clipping.width * 0.3:
+                header_separator = clipping.bbox[1]
+            else:
+                header_separator = header_separator['top']
 
-        if header_separator == self.table['bbox'][1] and len(separator) > 0:
-            header_separator = separator[0]['top']
-
-        bbox = copy.copy(self.table['bbox'])
-        bbox[3] = self.table['footer']
-        self.clipping = self.clipping.crop(bbox)
-
-        if header_separator is None or header_separator - clipping.bbox[1] > clipping.height * 0.5:
-            header_separator = self.table_lines[0]['top'] if len(self.table_lines) > 0 else clipping.bbox[1]
-
-        return footnote_complete, separator, header_separator
+        return separator, header_separator
     
     def find_unit_column(self, char):
         '''
@@ -165,21 +164,31 @@ class LayoutExtractor:
         rows.append(rect) # to get the bottom and top separator
         self.row_separator = rows   
 
-    def find_footnote(self, x_space, symbols):
+    def find_footnote(self, x_space):
+        """
+        Remove rows at the bottom of the table based on different criteria and find footnotes.
+
+        Parameters:
+            - self: the object itself
+            - x_space (int): The max spacing between chars until a new column is created.
+
+        Returns:
+            None
+        """
         separator = [x for x in self.row_separator if x['top'] > self.table['bbox'][1] and x['bottom'] < self.table['bbox'][3]]
         separator.append({'top': self.table['bbox'][3], 'bottom': self.table['bbox'][3]})
 
         i=len(separator)-1
         while i > 0:
             bbox = self.clipping.bbox.copy()
-            bbox[1] = separator[i-1]['top']
-            bbox[3] = separator[i]['bottom']
+            bbox[1] = separator[i-1]['bottom']
+            bbox[3] = separator[i]['top']
             if bbox[3] - bbox[1] <= 0:
                 i-=1
                 continue
             
             clip = self.clipping.crop(bbox)
-            cols = self.find_columns(clip, 2*x_space, [])
+            cols = self.find_columns(clip, 3*x_space, special_symbols=[' ', '.', '(cid:127)'])
             words = clip.extract_words()
             #width = max([w['x1'] for w in words], default=self.clipping.bbox[2]) - min([w['x0'] for w in words], default=self.clipping.bbox[0])
             leading_space = words[0]['x0'] - bbox[0] if len(words) > 0 else self.clipping.width
@@ -190,12 +199,12 @@ class LayoutExtractor:
                 self.table['bbox'][3] = bbox[1]
                 if self.table['footer'] > bbox[1]: self.table['footer'] = bbox[1]
             # remove centered lines
-            elif len(cols) == 0 and np.isclose(leading_space, trailing_space, 0.5) and leading_space != self.clipping.width:
+            elif len(cols) == 0 and np.isclose(leading_space, trailing_space, 0.2) and leading_space != self.clipping.width:
                 self.table['bbox'][3] = bbox[1]
                 if self.table['footer'] > bbox[1]: self.table['footer'] = bbox[1] 
             # remove footnotes -> # or (#) or #. or #) or *
             else:
-                if len(cols) == 1 and leading_space < self.clipping.width * 0.1 and re.search("^\(\d+\)$|^\*$|^\d+\.$|^\d+\)$|^\d+$", words[0]['text']) is not None:
+                if len(cols) == 1 and leading_space < self.clipping.width * 0.1 and re.search("^\(\d+\)$|^\*$|^\d+\.$|^\d+\)$|^\d+$|^\(cid:127\)$|^\([a-z]\)$", words[0]['text']) is not None:
                     self.table['footer'] = bbox[1]
                 else:
                     break
@@ -204,7 +213,17 @@ class LayoutExtractor:
         
         return
 
-    def remove_top(self, x_space, symbols):
+    def remove_at_top(self, x_space):
+        """
+        Removes rows at the top of the table based on different criteria.
+
+        Parameters:
+        - self: the object itself
+        - x_space: The max spacing between chars until a new column is created.
+
+        Returns:
+        - None
+        """
         separator = self.row_separator.copy()
         separator.insert(0, {'top': self.table['bbox'][1], 'bottom': self.table['bbox'][1]})
 
@@ -218,15 +237,25 @@ class LayoutExtractor:
                 continue
             
             clip = self.clipping.crop(bbox)
-            cols = self.find_columns(clip, 3*x_space, [])
+            cols = self.find_columns(clip, 3*x_space, special_symbols=[' ', '.', '(cid:127)'])
             words = clip.extract_words()
             #width = max([w['x1'] for w in words], default=self.clipping.bbox[2]) - min([w['x0'] for w in words], default=self.clipping.bbox[0])
-            word_indent = words[0]['x0'] - bbox[0] if len(words) > 0 else 0
-            if len(cols) == 0 and word_indent < self.clipping.width / 10:
+            leading_space = words[0]['x0'] - bbox[0] if len(words) > 0 else self.clipping.width
+            trailing_space = bbox[2] - words[-1]['x1'] if len(words) > 0 else self.clipping.width
+
+            # remove single lines within first 10% of table width
+            if len(cols) == 0 and leading_space < self.clipping.width * 0.05:
                 self.table['bbox'][1] = bbox[3]
+                if self.table['header'] < bbox[3]: self.table['header'] = bbox[3]
+            # remove centered lines
+            elif len(cols) == 0 and np.isclose(leading_space, trailing_space, 0.2) and leading_space != self.clipping.width:
+                self.table['bbox'][1] = bbox[3]
+                if self.table['header'] < bbox[3]: self.table['header'] = bbox[3]
+            # remove footnotes -> # or (#) or #. or #) or *
             else:
-                if len(cols) == 1 and re.search("^\(\d+\)$|^\*$|^\d+.?$", words[0]['text']) is not None:
-                    self.table['bbox'][1] = bbox[3]# if bbox[3] < self.table_lines[0]['top'] else self.table_lines[0]['top']
+                if len(cols) == 1 and leading_space < self.clipping.width * 0.05 and re.search("^\(\d+\)$|^\*$|^\d+\.$|^\d+\)$|^\d+$", words[0]['text']) is not None:
+                    self.table['bbox'][1] = bbox[3]
+                    if self.table['header'] < bbox[3]: self.table['header'] = bbox[3]
                 else:
                     break
 
@@ -240,49 +269,77 @@ class LayoutExtractor:
         while i < len(self.column_separator)-1:
             l1 = self.column_separator[i]
             l2 = self.column_separator[i+1]
+            if l1['x0'] == l2['x0']:
+                i+=1
+                continue
             min_bottom = min(l1['bottom'], l2['bottom'])
             max_top = max(l1['top'], l2['top'])
-            if max_top >= min_bottom:
+            if max_top >= min_bottom-2:
                 i+=1
                 continue
             bbox = [l1['x0'], max_top, l2['x1'], min_bottom]
-            if len(self.clipping.crop(bbox).chars) != 0:
+            try: 
+                if len([x for x in self.clipping.within_bbox(bbox).chars if x['text'] !=' ']) != 0:
+                    i+=1
+                    continue
+            except:
                 i+=1
                 continue
-
-            if min(l1['height'], l2['height']) == l1:
+            if min(l1['height'], l2['height']) == l1['height']:
                 self.column_separator.pop(i)
                 i+=1
-            else:
+            elif min(l1['height'], l2['height']) == l2['height']:
                 self.column_separator.pop(i+1)
+            elif l1['top'] < l2['top']:
+                l2['top'] = l1['bottom']
+                l1['bottom'] = min_bottom
+            else:
+                l1['top'] = l2['bottom']
+                l2['bottom'] = min_bottom
 
-    def find_layout(self, x_space, y_space, symbols, ignore_footnote=False):
+    def find_layout(self, x_space, y_space, symbols=[' ', '.', '(cid:127)']):
+        """
+        Find the layout of the table based on the provided x and y spaces and symbols.
+
+        Parameters:
+            x_space (int): The max spacing between chars until a new column is created.
+            y_space (int): The max spacing between lines until a new row is created.
+            symbols (list): List of special symbols that should be ignored. (deprecated)
+
+        Returns:
+            tuple: A tuple containing the column separators and row separators.
+        """
         self.column_separator = []
 
-        # find rows in whole table except for the footnote
-        footnote_complete, self.row_separator, self.table['header'] = self.find_rows(self.clipping, y_space)
-        #self.remove_top(x_space=x_space, symbols=symbols)
-        #footnote_complete, self.row_separator, self.table['header'] = self.find_rows(self.clipping.crop(self.table['bbox']), y_space)
+        # find rows and header
+        self.row_separator, self.table['header'] = self.find_rows(self.clipping, y_space)
+        self.remove_at_top(x_space=x_space)
+        self.row_separator, self.table['header'] = self.find_rows(self.clipping.crop(self.table['bbox']), y_space)
 
-        if not footnote_complete and not ignore_footnote: return footnote_complete, None, None
-
-        col_sep = []
-        
-        # add table lines as row separator
+        # add the ruling lines to the list of rows
         self.row_separator.extend([{'x0': self.table['bbox'][0], 'x1': self.table['bbox'][2], 'width': self.table['bbox'][2] - self.table['bbox'][0], 'object_type': 'line', 'top': x['top'], 'bottom': x['bottom']} for x in self.table['lines']])
-        self.row_separator = sorted(self.row_separator, key=lambda e: e['top'])
+        self.row_separator.sort(key=lambda e: e['top'])
 
-        self.find_footnote(x_space=x_space, symbols=symbols)
+        self.find_footnote(x_space=x_space)
 
-        # table is separated in horizontal segments: the columns are individual for each segment (important for multi-header tables)
-        # segments are defined by the top and bottom lines of the table, the header and the footer and the ruling lines above the headerline
+        # adjust left and right border after removing rows at top
+        self.clipping = self.clipping.crop(self.table['bbox'])
+        try: 
+            self.table['bbox'][0] = min([x['x0'] for x in self.clipping.chars if x['text'] != ' '])
+            self.table['bbox'][2] = max([x['x1'] for x in self.clipping.chars if x['text'] != ' '])
+        except:
+            return [], []
+
+        # table is separated in horizontal segments for individual column detection for header and body -> this is important for multi-header tables
+        # segments are defined by the top and bottom lines of the table, the header and the footer and the ruling lines that are above the headerline
         segments = [{'top': self.table['bbox'][1]}]
-        segments.extend(self.table_lines.copy() if self.table['header'] == self.table['bbox'][1] else [x for x in self.table_lines.copy() if x['top'] < self.table['header']])
+        if self.table['header'] != self.table['bbox'][1]: segments.extend([x for x in self.table_lines if x['top'] < self.table['header']])
         if self.table['header'] != self.table['bbox'][1]: segments.append({'top': self.table['header'], 'bottom': self.table['header']})
         segments.append({'top': self.table['footer'], 'bottom': self.table['footer']})
         if self.table['footer'] != self.table['bbox'][3]: segments.append({'top': self.table['bbox'][3], 'bottom': self.table['bbox'][3]})
 
         i=0
+        # find columns in each segment
         while i < len(segments)-1:
             bbox = self.clipping.bbox.copy()
             bbox[1] = segments[i]['top']
@@ -293,15 +350,13 @@ class LayoutExtractor:
                 i+=1
                 continue
 
-            col_sep.extend(cols)
+            self.column_separator.extend(cols)
 
             i+=1
 
-        self.column_separator.extend(col_sep)
+        self.remove_unessessary_columns()
 
-        #self.remove_unessessary_columns()
-
-        return footnote_complete, self.column_separator, self.row_separator
+        return self.column_separator, self.row_separator
 
     def get_table_settings(self):
         vertical_lines = [self.table['bbox'][0], self.table['bbox'][2]] # left and right line
