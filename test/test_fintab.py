@@ -58,6 +58,9 @@ def compare_cells(table, test_table, pdf_path, t_i, page):
                 matches += 1
                 break
 
+    if matches == 0:
+        return None
+
     precision = matches / len(table['cells'])
     recall = matches / len(test_table['cells'])
     f1 = (2*precision*recall)/(precision+recall)
@@ -76,7 +79,8 @@ def restructure_cells(cells, page):
             cell['bbox'][0] < page.bbox[0] or cell['bbox'][1] < page.bbox[1] or cell['bbox'][2] > page.bbox[2] or cell['bbox'][3] > page.bbox[3]):
             continue
         bbox = [cell['bbox'][0], page.height-cell['bbox'][3], cell['bbox'][2], page.height-cell['bbox'][1]]
-        text = page.crop(bbox).extract_text().replace('\n', ' ')
+        try: text = page.crop(bbox).extract_text().replace('\n', ' ')
+        except: continue
         restructured_cells.append({'bbox': bbox, 'text': text})
     
     return restructured_cells
@@ -87,7 +91,7 @@ def proc(dataset_path, pdf_path, test_tables, draw, tol, find_method, model=None
     cell_match_list = []
     total_found_tables = 0
 
-    tableExtractor = TableExtractor(path=f"{dataset_path}/pdf/{pdf_path}", separate_units=False, find_method=find_method, model=model, image_processor=image_processor, determine_row_space="min", max_column_space=4, max_row_space=2)
+    tableExtractor = TableExtractor(path=f"{dataset_path}/pdf/{pdf_path}", separate_units=False, find_method=find_method, model=model, image_processor=image_processor, determine_row_space="min", max_column_space=6, max_row_space=2)
     try: tables = tableExtractor.extractTables(page_index=0) # all pdfs contain only one page
     except Exception as e: print(f"Error in {pdf_path}: {e}");return [0,0,0,0]
     page = tableExtractor.pages[0]
@@ -118,29 +122,32 @@ def proc(dataset_path, pdf_path, test_tables, draw, tol, find_method, model=None
         match = False
         cell_match = False
 
-    if draw=='cell_match' and match and not cell_match:
-        im = page.to_image(resolution=300)
-        im2 = page.to_image(resolution=300)
-        for table in test_tables:
-            im.draw_rect(table['bbox'], stroke_width=0, fill=(230, 65, 67, 65)) # red for test tables
-            im.draw_rects([x['bbox'] for x in table['cells']], stroke_width=0, fill=(230, 65, 67, 65))
+    try: 
+        if draw=='cell_match' and match and not cell_match:
+            im = page.to_image(resolution=300)
+            im2 = page.to_image(resolution=300)
+            for table in test_tables:
+                im.draw_rect(table['bbox'], stroke_width=0, fill=(230, 65, 67, 65)) # red for test tables
+                im.draw_rects([x['bbox'] for x in table['cells']], stroke_width=0, fill=(230, 65, 67, 65))
 
-        for table in tables: 
-            im2.draw_rect(table['bbox'], stroke_width=0) # [table['bbox'][0], table['header'], table['bbox'][2], table['footer']], stroke_width=0)
-            im2.draw_rects([x['bbox'] for x in table['cells']])
+            for table in tables: 
+                im2.draw_rect(table['bbox'], stroke_width=0) # [table['bbox'][0], table['header'], table['bbox'][2], table['footer']], stroke_width=0)
+                im2.draw_rects([x['bbox'] for x in table['cells']])
 
-        im.save(f"img/{pdf_path.replace('/', '_')[0:-4]}_test.png")
-        im2.save(f"img/{pdf_path.replace('/', '_')[0:-4]}.png")
-    elif draw=='bbox_match' and not match:
-        im = page.to_image(resolution=300)
-        for table in test_tables:
-            im.draw_rect(table['bbox'], stroke_width=0, fill=(230, 65, 67, 65)) # red for test tables
+            im.save(f"img/{pdf_path.replace('/', '_')[0:-4]}_test.png")
+            im2.save(f"img/{pdf_path.replace('/', '_')[0:-4]}.png")
+        elif draw=='bbox_match' and not match:
+            im = page.to_image(resolution=300)
+            for table in test_tables:
+                im.draw_rect(table['bbox'], stroke_width=0, fill=(230, 65, 67, 65)) # red for test tables
 
-        for table in tables: 
-            im.draw_rect([table['bbox'][0], table['bbox'][1], table['bbox'][2], table['footer']], stroke_width=0)
-            #im.draw_hline(table['footer'])
+            for table in tables: 
+                im.draw_rect([table['bbox'][0], table['bbox'][1], table['bbox'][2], table['footer']], stroke_width=0)
+                #im.draw_hline(table['footer'])
 
-        im.save(f"img/{pdf_path.replace('/', '_')[0:-4]}.png")
+            im.save(f"img/{pdf_path.replace('/', '_')[0:-4]}.png")
+    except Exception as e:
+        print(f"Drawing-Error in {pdf_path}: {e}")
 
     return [len(match_list), len(mismatch_list), len(cell_match_list), total_found_tables]
 
@@ -163,7 +170,7 @@ def test_parallel(pdf_paths, annotated_tables, draw='cell_match', tol=5, find_me
 
     results = []
 
-    with concurrent.futures.ProcessPoolExecutor(max_workers=thread_number if find_method == 'rule-based' else 1, max_tasks_per_child=10 if find_method == 'rule-based' else None) as executor:
+    with concurrent.futures.ProcessPoolExecutor(max_workers=thread_number if find_method == 'rule-based' else 1, max_tasks_per_child=20 if find_method == 'rule-based' else None) as executor:
 
         for pdf_path in pdf_paths:
             if i >= len(annotated_tables):
@@ -234,13 +241,15 @@ if __name__ == '__main__':
     dataset_path = "fintabnet"
     pdf_paths = getPdfPaths(dataset_path + '/pdf')
 
+    #sub_start = 70000
+    #sub_end = 80000
     sub_start = 0
-    sub_end = 100
-    thread_number = 4
+    sub_end = 1000
+    thread_number = 10
 
-    find_method = 'rule-based'
+    find_method = 'microsoft'
     
-    annotated_tables, total = extractAnnotatedTables(dataset_path + "/FinTabNet_1.0.0_table_test.jsonl", sub_start=sub_start, sub_end=sub_end)   
+    annotated_tables, total = extractAnnotatedTables(dataset_path + "/all_tables.jsonl", sub_start=sub_start, sub_end=sub_end)   
     batch_size = int(total/thread_number)
     pdf_paths.sort()
 
