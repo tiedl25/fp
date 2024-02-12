@@ -1,8 +1,11 @@
+#!/usr/bin/env python3
 import pandas as pd
 import pdfplumber
 import copy
 import statistics
 import os
+import regex as re
+
 
 from ultralyticsplus import YOLO, render_result
 
@@ -93,12 +96,16 @@ class TableExtractor:
         Returns:
             list: The coordinates of the smallest bounding box in the format [x0, y0, x1, y1].
         """
+        cell[0]+=0.1
+        cell[1]+=0.1
+        cell[2]-=0.1
+        cell[3]-=0.1
         pagecrop = [x for x in page.crop(cell).chars if x['text'] not in [' ', '.']] # remove white spaces and dots because they should not be part of the cell
 
-        b1 = min(pagecrop, key=lambda e: e['x0'], default={'x0': cell[0]})
-        b2 = min(pagecrop, key=lambda e: e['top'], default={'top': cell[1]})
-        b3 = max(pagecrop, key=lambda e: e['x1'], default={'x1': cell[2]})
-        b4 = max(pagecrop, key=lambda e: e['bottom'], default={'bottom': cell[3]})
+        b1 = min(pagecrop, key=lambda e: e['x0'], default={'x0': cell[0]-0.1})
+        b2 = min(pagecrop, key=lambda e: e['top'], default={'top': cell[1]-0.1})
+        b3 = max(pagecrop, key=lambda e: e['x1'], default={'x1': cell[2]+0.1})
+        b4 = max(pagecrop, key=lambda e: e['bottom'], default={'bottom': cell[3]+0.1})
 
         return [b1['x0'], b2['top'], b3['x1'], b4['bottom']]
 
@@ -114,7 +121,154 @@ class TableExtractor:
             if d > 0:
                 diff.append(d)
 
-        return min(diff)-0.1 if self.determine_row_space == "min" else statistics.mode(diff)-0.1
+        return min(diff)-0.01 if self.determine_row_space == "min" else statistics.mode(diff)-0.1
+
+    def merge_cells(self, pdfplumber_table, table, page):
+        dot_lines = [x for x in table['lines'] if 'dot_line' in x.keys()]
+        table_text = pdfplumber_table.extract()
+
+        i=0
+
+        while i < len(pdfplumber_table.rows):
+            row = pdfplumber_table.rows[i]
+
+            index = [i for i,x in enumerate(pdfplumber_table.extract()[i]) if x != '' and x is not None]
+
+            if len(index) == 0:
+                i+=1
+                continue
+
+            cell = row.cells[index[0]]
+
+            if cell[3] <= table['header'] and i < len(pdfplumber_table.rows)-1:
+                cells = [x for x in row.cells if x is not None]
+                next_cells = [x for x in pdfplumber_table.rows[i+1].cells if x is not None]
+                if len(cells) != len(next_cells):
+                    i+=1
+                    continue
+                bbox = table['bbox'].copy()
+                bbox[3] = next_cells[0][3]-2
+                bbox[1] = cells[0][1]
+                lines = page.crop(bbox).lines
+                if len(lines) > 0 or bbox[3] > table['header']:
+                    #if len(tuple([x['top'] for x in lines])) == 1:
+                    i+=1
+                    continue
+
+                cell_top = cell[1]
+                for cell in pdfplumber_table.rows[i].cells:
+                    if cell != None: pdfplumber_table.cells.remove(cell)
+
+                for next_cell in pdfplumber_table.rows[i].cells:
+                    if next_cell is None:
+                        continue
+                    lst = list(next_cell)
+                    lst[1] = cell_top
+                    new_cell = tuple(lst)
+                    pdfplumber_table.cells.append(new_cell)
+                    pdfplumber_table.cells.remove(next_cell)
+                
+                continue         
+
+            try: chars = sorted([x for x in page.crop(cell).chars if x['text'] != ' '], key=lambda e: e['x0'])
+            except: continue
+
+            if len(chars) == 0:
+                i+=1
+                continue
+            
+
+            if len(index) == 1 and index[0] == 0 and i < len(pdfplumber_table.rows)-1:
+                if chars[-1]['text'] == ':':
+                    i+=1
+                    continue
+
+                intersecting_dot_lines = [dot_line for dot_line in dot_lines if cell[0] < dot_line['x0'] < cell[2] and cell[1] <= dot_line['top'] < dot_line['bottom'] <= cell[3]]
+                if len(intersecting_dot_lines) > 0:
+                    i+=1
+                    continue
+
+                next_cell = pdfplumber_table.rows[i+1].cells[index[0]]
+                if next_cell is None:
+                    i+=1
+                    continue
+
+                next_row_char = [x for x in page.crop(next_cell).chars if x['text'] != ' ']
+                if len(next_row_char) == 0:
+                    i+=1
+                    continue
+
+                if re.search("[a-z, A-Z]", ''.join([x['text'] for x in next_row_char])) is None:
+                    i+=1
+                    continue
+
+                if chars[0]['fontname'] != next_row_char[0]['fontname'] or min([x['top'] for x in next_row_char]) - max([x['bottom'] for x in chars]) > self.max_columns_space * 1.5:
+                    i+=1
+                    continue
+
+                bbox = table['bbox'].copy()
+                bbox[3] = next_cell[3]
+                bbox[1] = cell[1]+1
+                lines = page.crop(bbox).lines
+                if len(lines) > 0:
+                    #if len(tuple([x['top'] for x in lines])) == 1:
+                    i+=1
+                    continue
+
+                cell_top = cell[1]
+                for cell in pdfplumber_table.rows[i].cells:
+                    if cell != None: pdfplumber_table.cells.remove(cell)
+
+                
+                for next_cell in pdfplumber_table.rows[i].cells:
+                    if next_cell is None:
+                        continue
+                    lst = list(next_cell)
+                    lst[1] = cell_top
+                    new_cell = tuple(lst)
+                    pdfplumber_table.cells.append(new_cell)
+                    pdfplumber_table.cells.remove(next_cell)
+            elif len(index) == 1 and index[0] > 0 and i!= 0:
+                previous_cell = pdfplumber_table.rows[i-1].cells[index[0]]
+                if previous_cell is None:
+                    i+=1
+                    continue
+
+                previous_row_char = [x for x in page.crop(previous_cell).chars if x['text'] != ' ']
+                if len(previous_row_char) == 0:
+                    i+=1
+                    continue            
+
+                if re.search("[a-z, A-Z]", ''.join([x['text'] for x in previous_row_char])) is None:
+                    i+=1
+                    continue
+
+                if chars[0]['fontname'] != previous_row_char[0]['fontname'] or min([x['top'] for x in chars]) - max([x['bottom'] for x in previous_row_char]) > self.max_columns_space * 1.5:
+                    i+=1
+                    continue
+                
+                bbox = table['bbox'].copy()
+                bbox[1] = previous_cell[1]
+                bbox[3] = cell[3]-1
+                if len(page.crop(bbox).lines) > 0:
+                    i+=1
+                    continue
+
+                cell_bottom = cell[3]
+                for previous_cell in pdfplumber_table.rows[i-1].cells:
+                    if previous_cell is None:
+                        continue
+                    lst = list(previous_cell)
+                    lst[3] = cell_bottom
+                    new_cell = tuple(lst)
+                    pdfplumber_table.cells.append(new_cell)
+                    pdfplumber_table.cells.remove(previous_cell)
+
+                for cell in pdfplumber_table.rows[i].cells:
+                    if cell != None: pdfplumber_table.cells.remove(cell)
+            else:
+                i+=1
+
 
     def extractTable(self, page, table_index=0, table=None, img_path=None, image=None, overwrite=False):
         """
@@ -132,70 +286,42 @@ class TableExtractor:
         Returns:
             dict: The table dictionary containing the table's bounding box, settings, cells, and extracted text. Returns None if no table is found.
         """
-        # rule-based
-        if self.find_method == 'rule-based':
-            footnote_complete = False
-            threshold = 5 # max_diff for finding table bottom
-            
-            # increase threshold if the footnote is incomplete and try again to find the table
-            while not footnote_complete and threshold < 20: 
-                
-                # get table bbox if none is provided or the footnote is incomplete
-                if table == None or threshold > 5:
-                    page = copy.copy(self.pages[0])
-                    tf = TableFinder(page)
-                    tables = tf.find_tables(bottom_threshold=threshold)
+        # get table bbox if none is provided
+        if table == None:
+            page = copy.copy(self.pages[0])
+            tf = TableFinder(page, model=self.model, image_processor=self.image_processor)
+            tables = tf.find_tables(find_method=self.find_method, image=image if image is not None else page.to_image(resolution=300))
 
-                    if table_index >= len(tables):
-                        return None
-                    table = tables[table_index]
-
-                page_crop = page.crop(table['bbox'])
-                le = LayoutExtractor(table, page_crop, separate_units=self.separate_units)
-                footnote_complete, _, _ = le.find_layout(self.max_columns_space, self.determine_max_linepitch(page), ['$', '%'])
-
-                threshold += 5
-
-            if not footnote_complete:
+            if table_index >= len(tables):
                 return None
-
-        # model-based
-        elif self.find_method in ['model-based', 'microsoft']:
-            # get table bbox if none is provided
-            if table == None:
-                page = copy.copy(self.pages[0])
-
-                tf = TableFinder(page, model=self.model, image_processor=self.image_processor)
-                tables = tf.find_tables(find_method=self.find_method, image=image if image is not None else page.to_image(resolution=300))
-
-                if table_index >= len(tables):
-                    return None
-                table = tables[table_index]
-            
-            page_crop = page.crop(table['bbox'])
-
-            le = LayoutExtractor(table, page_crop, separate_units=self.separate_units)
-            # TODO average line height
-            le.find_layout(self.max_columns_space, self.determine_max_linepitch(page), ['$', '%'], ignore_footnote=True)
-
-
-        # for both methods
+            table = tables[table_index]
+        
+        page_crop = page.crop(table['bbox'])
+        le = LayoutExtractor(table, page_crop, separate_units=self.separate_units)
+        col_sep, row_sep = le.find_layout(self.max_columns_space, self.determine_max_linepitch(page))
 
         table['settings'] = le.get_table_settings()
         pdfplumber_table = page_crop.find_table(table['settings'])
-
-        if pdfplumber_table == None:
+        if pdfplumber_table == None or len(pdfplumber_table.rows) <= 2 or len(col_sep) == 0:
             return None
 
+        self.merge_cells(pdfplumber_table, table, page)
+
         table_cells = []
-        for cell in pdfplumber_table.cells: 
-            bbox = self.shrink_cell(page, cell)
+        for cell in sorted(pdfplumber_table.cells, key=lambda e: e[1]): 
+            bbox = self.shrink_cell(page, list(cell))
+            if bbox == list(cell): continue
             try: 
                 text = page_crop.crop(bbox).extract_text().replace('\n', ' ')
                 if text == '':
                     continue
-                table_cells.append({'bbox': bbox, 'text': text})
-            except: continue
+                if len(table_cells) > 0 and table_cells[-1]['text'] == "$":
+                    table_cells[-1]['text'] += f" {text}"
+                    table_cells[-1]['bbox'][2] = bbox[2]
+                    continue
+                table_cells.append({'bbox': bbox, 'text': text, 'original_bbox': cell})
+            except:
+                continue
 
         # reformatted cells
         table['cells'] = table_cells
@@ -250,10 +376,11 @@ class TableExtractor:
             #image.draw_hlines([x['top'] for x in table['lines']], stroke_width=3, stroke=(230, 65, 67, 65)) # redraw existing lines
             #image.debug_tablefinder(table['settings'])
             image.draw_rect(table['bbox'])
-            #image.draw_rects(x['bbox'] for x in table['cells'])
+            image.draw_rects(x['bbox'] for x in table['cells'])
+            #image.draw_rects([x for x in table['pdfplumber_cells']['cells']])
             image.draw_hline(table['footer'])
             image.draw_hline(table['header'])
-            #image.draw_vline(page.width/2)
+            #image.draw_vline((max(page.chars, key=lambda e: e['x1'])['x1'] + min(page.chars, key=lambda e: e['x0'])['x0'])/2)
         
         if img_path is not None: 
             if not os.path.exists(img_path): os.mkdir(img_path)
@@ -305,9 +432,9 @@ if __name__ == '__main__':
     else :
         model = None    
         image_processor = None
-
-    te = TableExtractor(path="fintabnet/pdf/ADS/2009/page_177.pdf", separate_units=False, find_method=find_method, model=model, image_processor=image_processor, determine_row_space="min", max_column_space=4, max_row_space=2)
-    tables = te.extractTables(img_path='.')
+    
+    te = TableExtractor(path="fintabnet/pdf/J/2009/page_88.pdf", separate_units=False, find_method=find_method, model=model, image_processor=image_processor, determine_row_space="min", max_column_space=6, max_row_space=2)
+    tables = te.extractTables(img_path='.', overwrite=True)
     
     #dataframes = [te.tableToDataframe(table['pdfplumber_cells']['text']) for table in tables]
     #for i, df in enumerate(dataframes): te.export('excel', f'excel/test_{i}', dataframe=df)
