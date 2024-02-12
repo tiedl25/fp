@@ -2,6 +2,7 @@ import pdfplumber
 import statistics
 import itertools
 import torch
+import numpy as np
 
 class TableFinder:
     def __init__(self, page, model=None, image_processor=None) -> None:
@@ -26,8 +27,7 @@ class TableFinder:
             int: The top position of the table.
 
         """
-        chars = sorted(self.page.crop(bbox, strict=False).chars, key=lambda e: e['top'])
-        chars.reverse()
+        chars = sorted(self.page.crop(bbox, strict=False).chars, key=lambda e: e['top'], reverse=True)
         if not must_contain_chars: chars.insert(0, {'top': bbox[3], 'bottom': bbox[3], 'text': '_'})
 
         i=0
@@ -86,8 +86,7 @@ class TableFinder:
         if bbox[0] == bbox[2]:
             return self.page.bbox[0]
 
-        chars = sorted(self.page.crop(bbox).chars, key=lambda e: e['x1'])
-        chars.reverse()
+        chars = sorted(self.page.crop(bbox).chars, key=lambda e: e['x1'], reverse=True)
         chars.insert(0, {'x0': bbox[2], 'x1': bbox[2], 'text': '_'})
 
         i=0
@@ -225,18 +224,6 @@ class TableFinder:
 
     def find_lines_of_dots(self):
         dots = [x for x in self.page.chars if x['text'] == '.']
-        #dots = sorted(dots, key=lambda e: e['x0'])
-        #
-        #dots_grouped_by_y = []
-        #current_dot = dots.pop(0)
-        #
-        #for dot in dots:
-        #    if dot['top'] == current_dot['top']:
-        #        dots_grouped_by_y.append(dot)
-        #        current_dot = dot
-        #    else:
-        #        dots_grouped_by_y.append([current_dot])
-        #        current_dot = dot
 
         dots_grouped_by_y = [list(group) for key, group in itertools.groupby(sorted(dots, key=lambda e: e['top']), lambda e: e['top'])]
         lines = []
@@ -251,7 +238,7 @@ class TableFinder:
                     if len(current_group) > 3:
                         x0 = min(current_group, key=lambda e: e['x0'])['x0']
                         x1 = max(current_group, key=lambda e: e['x1'])['x1']
-                        lines.append({'x0': x0, 'x1': x1, 'top': current_group[0]['bottom'], 'bottom': current_group[0]['bottom'], 'width': x1 - x0, 'height': 1})
+                        lines.append({'x0': x0, 'x1': x1, 'top': current_group[0]['bottom'], 'bottom': current_group[0]['bottom'], 'width': x1 - x0, 'height': 1, 'dot_line': True})
                     current_group = [dot]
 
         #lines = [{'x0': min(x, key=lambda e: e['x0'])['x0'], 'x1': max(x, key=lambda e: e['x1'])['x1'], 'top': x[0]['bottom'], 'bottom': x[0]['bottom'], 'width': max(x, key=lambda e: e['x1'])['x1'] - min(x, key=lambda e: e['x0'])['x0'], 'height': 1} for x in dots_grouped_by_y if len(x) > 3]
@@ -408,10 +395,16 @@ class TableFinder:
         Returns:
             bool: True if the table lies in one column, False otherwise.
         """
-        mid = self.page.width/2
-        objs = self.page.crop([mid-3, top if top > self.page.bbox[1] else self.page.bbox[1], mid+3, bottom if bottom < self.page.bbox[3] else self.page.bbox[3]], strict=False)
+        chars = sorted([x for x in self.page.chars if x['matrix'][1] == 0 and x['matrix'][2] == 0 and x['text'] != ' ' and x['x0'] >= self.page.bbox[0] and x['x1'] <= self.page.bbox[2]], key=lambda e: e['x0'])
+        mid = (chars[0]['x0'] + chars[-1]['x1'])/2
+
+        objs = self.page.crop([mid, top if top > self.page.bbox[1] else self.page.bbox[1], mid+3, bottom if bottom < self.page.bbox[3] else self.page.bbox[3]], strict=False)
         objs = objs.chars + objs.lines + objs.rects
-        return len(objs) > 0
+
+        mid_chars = self.page.crop([mid, self.page.bbox[1], mid+3, self.page.bbox[3]], strict=False).chars
+        sum_height = sum(x['height'] for x in mid_chars)
+
+        return len(objs) > 1 or sum_height > self.page.height * 0.3
             
     def find_tables(self, bottom_threshold=5, top_threshold=4, left_threshold=2, right_threshold=2, find_method='rule-based', image=None):
         """
@@ -426,11 +419,17 @@ class TableFinder:
         Returns:
             list: A list of derived tables found in the document.
         """
-        self.lines = [x for x in self.lines if x['x0'] != x['x1'] and x['top'] >= self.page.bbox[1] and x['bottom'] <= self.page.bbox[3]] # remove vertical lines
         self.lines.extend(self.collapse_rects_and_curves())
+        self.lines = [x for x in self.lines if x['x0'] != x['x1'] and x['top'] >= self.page.bbox[1] and x['bottom'] <= self.page.bbox[3] and x['x0'] >= self.page.bbox[0] and x['x1'] <= self.page.bbox[2]] # remove vertical lines
         self.lines.sort(key = lambda e: e['top'])
         line_segments = self.concat_lines(self.lines)
         self.lines = self.concat_line_segments(line_segments)
+
+        chars = sorted([x for x in self.page.chars if x['matrix'][1] == 0 and x['matrix'][2] == 0 and x['text'] != ' ' and x['x0'] >= self.page.bbox[0] and x['x1'] <= self.page.bbox[2]], key=lambda e: e['x0'])
+
+        # remove first line if it seems to be a title line
+        if len(self.lines) > 0 and np.isclose(self.lines[0]['width'], chars[-1]['x1'] - chars[0]['x0'], 0.2):
+            self.lines.pop(0)
 
         all_lines = self.find_lines_of_dots() + self.lines
         all_lines.sort(key = lambda e: e['top'])
@@ -448,7 +447,6 @@ class TableFinder:
                     continue
 
                 if self.one_column_layout(top-top_threshold, bottom+bottom_threshold):
-                    #chars = sorted([x for x in self.page.crop([self.page.bbox[0], top, self.page.bbox[2], bottom]).chars if x['matrix'][1] == 0 and x['matrix'][2] == 0], key=lambda e: e['x0'])
                     chars = sorted([x for x in self.page.crop(self.page.bbox).chars if x['matrix'][1] == 0 and x['matrix'][2] == 0], key=lambda e: e['x0'])
                     left, right = chars[0]['x0'], chars[-1]['x1']
                 else: 
@@ -502,7 +500,7 @@ class TableFinder:
 
             # convert outputs (bounding boxes and class logits) to Pascal VOC format (xmin, ymin, xmax, ymax)
             target_sizes = torch.tensor([image.original.size[::-1]])
-            results = self.image_processor.post_process_object_detection(outputs, threshold=0.7, target_sizes=target_sizes)[0]
+            results = self.image_processor.post_process_object_detection(outputs, threshold=0.5, target_sizes=target_sizes)[0]
 
             boxes = []
             #derived_tables = []
@@ -510,10 +508,14 @@ class TableFinder:
                 bbox = [round(i/image.scale, 2) for i in box.tolist()] # reorder and scale
                 bbox = self.extend_table(top_threshold=2, bottom_threshold=2, bbox=bbox) # extend
 
-                bbox[0] = min(self.page.crop(bbox).chars, key=lambda e: e['x0'])['x0']
-                bbox[1] = min(self.page.crop(bbox).chars, key=lambda e: e['top'])['top']
-                bbox[2] = max(self.page.crop(bbox).chars, key=lambda e: e['x1'])['x1']
-                bbox[3] = max(self.page.crop(bbox).chars, key=lambda e: e['bottom'])['bottom']
+                chars = self.page.crop(bbox).chars
+                if len(chars) == 0:
+                    continue
+
+                bbox[0] = min(chars, key=lambda e: e['x0'])['x0']
+                bbox[1] = min(chars, key=lambda e: e['top'])['top']
+                bbox[2] = max(chars, key=lambda e: e['x1'])['x1']
+                bbox[3] = max(chars, key=lambda e: e['bottom'])['bottom']
 
                 table = {'bbox': bbox, 'lines': self.lines, 'settings': {}, 'cells': []}
                 table['footer'] = table['bbox'][3]
@@ -524,7 +526,7 @@ class TableFinder:
             
         # Make sure that all the lines are within the table
         for t in derived_tables:
-            t['lines'] = [x for x in t['lines'] if (x['x0']>=t['bbox'][0]-2 and x['x1']<=t['bbox'][2]+2 and
+            t['lines'] = [x for x in t['lines'] if (x['x0']>=t['bbox'][0]-5 and x['x1']<=t['bbox'][2]+5 and
                                                     x['top']>=t['bbox'][1] and x['bottom']<=t['bbox'][3])]
 
         return derived_tables
