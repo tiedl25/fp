@@ -36,18 +36,18 @@ A page is considered as one-column page if characters and lines can be found in 
 ### Model-based Approach
 For comparison and better results two different machine-learning models are used. yolov8s-table-extraction and microsoft table-detection. The settings for the microsofts table-detection are slightly altered to recognize more tables with the cost of a little more inacuracy. The default threshold value is 0.9, but with that a lot of tables aren't detected. With a threshold value of 0.5 a lot more tables are detected but they sometimes have to wide boundaries, especially to the top and bottom. However this can be compensated within the table layout detection. Overall Microsofts model gives better results. Both approaches are implemented within the table detection class and the user can choose what method should be used. The image data both models need can also be accessed via pdfplumber.
 
-## 1.2. Layou detection
+## 1.2. Layout detection
 ### pdfplumber table extraction
 Pdfplumber has it's own method for table extraction, with options to specify explicit lines. Unfortunately the lack of information about the tables lead to no results. The ruling lines doesn't really help, but the results are better when the bounding box from the first step ist used. To detect the layout it uses the distance between words and characters for both column and row detection. But even after tweaking the settings a littel more the table extraction isn't very reliable.
 
 <img src="assets/pdfplumber_table_extraction.png" width="300" />
 
-### LayoutExtractor
+### LayoutExtractor Class
 This is a custom approach to detect the table layout. In the end it comes down to finding rows and columns. The separators for these rows/columns are then used as explicit lines for pdfplumber's table extraction.
 The very basic decision criteria for the separators is the x-distance between to characters for vertical and the y-distance for horizontal lines respectively. For both axis a threshold can be set. The default settings are x=5, y=2. Unfortunately there are also a ton of edge cases.
 
 #### Average line space
-To further improve the row extraction, the line spacing is used. Line spacing is calculated as the y-distance between 2 characters. By skipping negative values, characters one the same text line are ignored. The average line spacing is calculated with the mode() function of the statistics library, however it turned out, that the minimum line spacing (staticstics.min()) gives overall better results. The user can change this and also set a custom value.
+To improve the separation of different rows, the maximum line spacing from which a new row is created, is calculated based on the text in the pdf rather than a default value. Line spacing is calculated as the y-distance between 2 characters. By skipping negative values, characters one the same text line are ignored. The average line spacing can be calculated with the mode() function of the statistics library, however it turned out, that the minimum line spacing (staticstics.min()) gives overall better results. The user can change this and also set a custom value.
 
 <img src="assets/font_criteria.png" width="300" />
 
@@ -65,16 +65,29 @@ Footnotes are recognized as such, if they meet the following requirements:
 The search for footnotes start from the bottom and ends with the first line that isn't a footnote.
 Other lines that should't be part of the table are lines with no vertical divider (only one cell), that beginn within the first 10% of the table width. They are removed both above and below the table
 
+<img src="assets/remove_at_bottom.png" width="600" />
+<img src="assets/remove_footnote.png" width="600" />
+
 #### Header
 Unfortunately the ruling lines are rather useless for consistent header extraction. 
-The header separator, is set to be the first occurrence of a font-change between two characters, assuming they are sorted from top to bottom. If there is no font change within the first 30% of the tables height, the first ruling line wider than 30% of the table width is used. These values are based on observations.
+The header separator, is set to be the first occurrence of a font-change between two characters, assuming they are sorted from top to bottom. If there is no font change within 90% of the tables height, the ruling line with the greates width is used.
 
-<img src="assets/header_footer.png" width="600" />
+<img src="assets/multi_header.png" width="600" />
 
 #### Column separation with header line
 To correctly recognize multi header tables, the header is divided into multiple horizontal segments according to the rows; the rest of the table (body) is also added as one segment. Each segment is independently scanned for columns.
 
-#### Shrink Cells
+## 1.3 Table Extraction
+
+### Remove Cells
+Remove cells that have either only one cell, one column or one row.
+
+### Merge cells
+#### Rows with only one cell
+
+#### Cells containing only dollar symbol
+
+### Shrink Cells
 Remove dots and spaces and then shrink extracted cells to the minimum bounding box.
 
 
