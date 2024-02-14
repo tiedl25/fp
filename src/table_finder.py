@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import pdfplumber
 import statistics
 import itertools
@@ -294,34 +295,34 @@ class TableFinder:
                 table['lines'].append(test_table['lines'][0])
             else:
                 if l_inside and rr:
-                    table['lines'].append(test_table['lines'][0])
+                    if len(test_table['lines']) > 0: table['lines'].append(test_table['lines'][0])
                     table_bbox[2] = bbox[2] # 3 4 5
                     if b_inside and tt:
                         table_bbox[1] = bbox[1] # 3
                     elif t_inside and bb:
                         table_bbox[3] = bbox[3] # 5
                 elif r_inside and ll:
-                    table['lines'].append(test_table['lines'][0])
+                    if len(test_table['lines']) > 0: table['lines'].append(test_table['lines'][0])
                     table_bbox[0] = bbox[0] # 7 8 1
                     if b_inside and tt:
                         table_bbox[1] = bbox[1] # 7
                     elif t_inside and bb:
                         table_bbox[3] = bbox[3] # 1
                 elif b_inside and tt:
-                    table['lines'].append(test_table['lines'][0])
+                    if len(test_table['lines']) > 0: table['lines'].append(test_table['lines'][0])
                     table_bbox[1] = bbox[1] # 1 2 3 --> in reality only 2
                 elif t_inside and bb:
-                    table['lines'].append(test_table['lines'][0])
+                    if len(test_table['lines']) > 0: table['lines'].append(test_table['lines'][0])
                     table_bbox[3] = bbox[3] # 5 6 7 --> in reality only 6 
                 elif l_inside and r_inside:
-                    table['lines'].append(test_table['lines'][0])
+                    if len(test_table['lines']) > 0: table['lines'].append(test_table['lines'][0])
 
                     if tt:
                         table_bbox[1] = bbox[1]
                     if bb:
                         table_bbox[3] = bbox[3]
                 elif b_inside and t_inside:
-                    table['lines'].append(test_table['lines'][0])
+                    if len(test_table['lines']) > 0: table['lines'].append(test_table['lines'][0])
 
                     if rr:
                         table_bbox[2] = bbox[2]
@@ -384,7 +385,7 @@ class TableFinder:
 
         return statistics.mode(diff)
         
-    def one_column_layout(self, top, bottom):
+    def one_column_layout(self, top, bottom, mid):
         """
         Determine if table takes whole page width or lies in one of the columns of the page.
         
@@ -395,9 +396,6 @@ class TableFinder:
         Returns:
             bool: True if the table lies in one column, False otherwise.
         """
-        chars = sorted([x for x in self.page.chars if x['matrix'][1] == 0 and x['matrix'][2] == 0 and x['text'] != ' ' and x['x0'] >= self.page.bbox[0] and x['x1'] <= self.page.bbox[2]], key=lambda e: e['x0'])
-        mid = (chars[0]['x0'] + chars[-1]['x1'])/2
-
         objs = self.page.crop([mid, top if top > self.page.bbox[1] else self.page.bbox[1], mid+3, bottom if bottom < self.page.bbox[3] else self.page.bbox[3]], strict=False)
         objs = objs.chars + objs.lines + objs.rects
 
@@ -426,10 +424,10 @@ class TableFinder:
         self.lines = self.concat_line_segments(line_segments)
 
         chars = sorted([x for x in self.page.chars if x['matrix'][1] == 0 and x['matrix'][2] == 0 and x['text'] != ' ' and x['x0'] >= self.page.bbox[0] and x['x1'] <= self.page.bbox[2]], key=lambda e: e['x0'])
-
-        # remove first line if it seems to be a title line
-        if len(self.lines) > 0 and np.isclose(self.lines[0]['width'], chars[-1]['x1'] - chars[0]['x0'], 0.2):
-            self.lines.pop(0)
+        mid = (chars[0]['x0'] + chars[-1]['x1'])/2
+        mid_chars = self.page.crop([mid, self.page.bbox[1], mid+3, self.page.bbox[3]], strict=False).chars
+        if sum(x['height'] for x in mid_chars) < self.page.height * 0.065:
+            self.lines = [x for x in self.lines if x['width'] < (chars[-1]['x1'] - chars[0]['x0']) * 0.5]
 
         all_lines = self.find_lines_of_dots() + self.lines
         all_lines.sort(key = lambda e: e['top'])
@@ -446,7 +444,7 @@ class TableFinder:
                 if top >= bottom:
                     continue
 
-                if self.one_column_layout(top-top_threshold, bottom+bottom_threshold):
+                if self.one_column_layout(top-top_threshold, bottom+bottom_threshold, mid):
                     chars = sorted([x for x in self.page.crop(self.page.bbox).chars if x['matrix'][1] == 0 and x['matrix'][2] == 0], key=lambda e: e['x0'])
                     left, right = chars[0]['x0'], chars[-1]['x1']
                 else: 
@@ -483,18 +481,7 @@ class TableFinder:
 
                 self.tables = derived_tables
 
-        elif find_method == 'model-based' and self.model is not None and image is not None:
-            table_boxes = self.model.predict(image.original)[0].boxes
-
-            derived_tables = []
-            for t_i, table in enumerate(table_boxes):
-                #bbox = [x/image.scale for x in table.xyxy.tolist()[0]]
-                bbox = self.extend_table(top_threshold=2, bottom_threshold=2, bbox=[x/image.scale for x in table.xyxy.tolist()[0]]) # apply image scale and extend bbox
-                derived_tables.append({'bbox': bbox, 'lines': self.lines, 'settings': {}, 'cells': []})
-                derived_tables[t_i]['footer'] = derived_tables[t_i]['bbox'][3]
-                derived_tables[t_i]['header'] = derived_tables[t_i]['bbox'][1]
-
-        elif find_method == 'microsoft' and self.model is not None and image is not None and self.image_processor is not None:
+        elif find_method == 'model-based' and self.model is not None and image is not None and self.image_processor is not None:
             inputs = self.image_processor(images=image.original, return_tensors="pt")
             outputs = self.model(**inputs)
 
@@ -523,6 +510,49 @@ class TableFinder:
                 self.tables.append(table)
 
             derived_tables = self.tables
+
+            #a = self.tables[0]['bbox'].copy()
+            #a[0]-=10
+            #a[2]+=10
+            #a[1]-=10
+            #a[3]+=10
+            #image = self.page.crop(a).to_image(resolution=300)
+            #from transformers import AutoImageProcessor, TableTransformerForObjectDetection
+#
+            #structure_image_processor = AutoImageProcessor.from_pretrained("microsoft/table-transformer-structure-recognition")
+            #structure_model = TableTransformerForObjectDetection.from_pretrained("microsoft/table-transformer-structure-recognition")
+            #
+            #inputs = structure_image_processor(images=image.original, return_tensors="pt")
+            #outputs = structure_model(**inputs)
+#
+            ## convert outputs (bounding boxes and class logits) to Pascal VOC format (xmin, ymin, xmax, ymax)
+            #target_sizes = torch.tensor([(image.original.size[::-1][0]/image.scale, image.original.size[::-1][1]/image.scale)])
+            #results = structure_image_processor.post_process_object_detection(outputs, threshold=0.7, target_sizes=target_sizes)[0]
+            #t = self.tables[0]['bbox']
+            #boxes = []
+            #derived_tables = []
+            #for score, label, box in zip(results["scores"], results["labels"], results["boxes"]):
+            #    bbox = [a+b for a, b in zip([t[0], t[1], t[0], t[1]], box.tolist())] # reorder and scale
+            #    #bbox = self.extend_table(top_threshold=2, bottom_threshold=2, bbox=bbox)
+            #    boxes.append({'label': structure_model.config.id2label[label.item()], 'score': score.item(), 'bbox': bbox})
+
+            #derived_tables = []
+            #if (len(self.tables)>0):
+            #    while True:
+            #        new_table = self.derive_tables()
+            #        new_table['footer'] = new_table['bbox'][3]
+            #        new_table['header'] = new_table['bbox'][1]
+            #        derived_tables.append(new_table)
+            #        if len(self.tables) == 0:
+            #            break
+            #        if len(self.tables) == 1:
+            #            new_table = self.tables.pop(0)
+            #            new_table['footer'] = new_table['bbox'][3]
+            #            new_table['header'] = new_table['bbox'][1]
+            #            derived_tables.append(new_table)
+            #            break
+            #
+            #    self.tables = derived_tables
             
         # Make sure that all the lines are within the table
         for t in derived_tables:
