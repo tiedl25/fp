@@ -36,6 +36,8 @@ A page is considered as one-column page if characters and lines can be found in 
 ### Model-based Approach
 For comparison and better results two different machine-learning models are used. yolov8s-table-extraction and microsoft table-detection. The settings for the microsofts table-detection are slightly altered to recognize more tables with the cost of a little more inacuracy. The default threshold value is 0.9, but with that a lot of tables aren't detected. With a threshold value of 0.5 a lot more tables are detected but they sometimes have to wide boundaries, especially to the top and bottom. However this can be compensated within the table layout detection. Overall Microsofts model gives better results. Both approaches are implemented within the table detection class and the user can choose what method should be used. The image data both models need can also be accessed via pdfplumber.
 
+Microsofts table detection was trained on the [PubTables dataset](https://www.microsoft.com/en-us/research/publication/pubtables-1m/), that would explain that the table-detection rate isn't so much higher than the custom approach. However their also exists a version that is trained on fintabnet, unfortunately the weights aren't published.
+
 ## 1.2. Layout detection
 ### pdfplumber table extraction
 Pdfplumber has it's own method for table extraction, with options to specify explicit lines. Unfortunately the lack of information about the tables lead to no results. The ruling lines doesn't really help, but the results are better when the bounding box from the first step ist used. To detect the layout it uses the distance between words and characters for both column and row detection. But even after tweaking the settings a littel more the table extraction isn't very reliable.
@@ -92,10 +94,36 @@ Remove dots and spaces and then shrink extracted cells to the minimum bounding b
 
 
 # Testing and Evaluation
-The test_fintab.py script evaluates if the tables being detected in a pdf correspond to the tables in the fintabnet dataset. Both the custom table detection and microsofts table detection were tested. 
-For every detected table a similar table in fintabnet is looked for (threshold 30). That means, the differences of each side in total are required to be less than 30. If that's the case, the table cells are compared. Matching cells are cells tested with the use of the SequenceMatcher class (difflib library). If there matching ratio is greater than 0.9, they are defined similar enough. If the f1 score is greater than 0.7 the cell structure is considered equal enough.
+The test_fintab.py script evaluates if the tables being detected in a pdf correspond to the tables in the fintabnet dataset. Both the custom table detection and microsofts table detection were tested. The dataset can be downloaded from <https://developer.ibm.com/exchanges/data/all/fintabnet/>. <br>
+For every detected table a similar table in fintabnet is looked for (threshold 30). That means, the summed up differences of each side are required to be less than 30. If that's the case, the table cells are compared. To check whether two cells match is tested with the SequenceMatcher class (difflib library). If the matching ratio is greater than 0.9, they are considered similar enough. With all cells compared, the precision, recall and f1 score are calculated for the table. If the f1 score is greater than 0.7 the cell structure is considered equal enough. The choosen values have turned out to be a good compromise. For comparison the following images shows what would be considered incorrect if we want a perfect table.
+
+<img src="assets/cell_compare_no_threshold.png" width="600" />
+<img src="assets/cell_compare_no_threshold_test.png" width="600" />
+
+It also has to be considered that the annotated tables in fintabnet are not always correct. The following image might be an extreme example but it wasn't the only one with missing table annotations.
+
+<img src="assets/fintab_not_all_tables_found.png" width="600" />
+
 
 It is important to know that the cells aren't always correctly or consistently annotated in the dataset (personal observations). Sometimes cells consist of multiple text-lines which does make sense but sometimes they are split into multiple cells but would make sense to merge them.
+
+Comparison between the custom approach and the microsofts table detection model. Both use the same batch of the first 10000 tables sorted alphabetically by their filename.
+
+Metric | Custom table detection | % | Microsoft table detection | %
+---|---|---|---|---
+Number of tables found | 12503/10000 | - | 11000/10000 | - 
+Precision (Number of matches / Number of found tables) | 6792/12503 | 54.32 %| 6844/11000 | 62.22 %
+Recall (Number of matches / Number of expected tables) | 6792/10000 | 67.92 %| 6844/10000 | 68.44 %
+F1-Score | 0.6 | - | 0.65 | -
+Cell Precision (Number of tables with correct cells / Number of found Tables) | 6189/12503 | 49.5 %  | 6215/11000 | 56.5 %
+Cell Recall (Number of tables with correct cells / Number of expected tables) | 6189/10000 | 61.89 % | 6215/10000 | 62.15 %
+Cell F1-Score | 0.55 | - | 0.59 | -
+Number of tables with correct cells / Number of correct tables | 6189/6792 | 91.12 % | 6215/6844 | 90.81 %
+Time spent | 18:41 minutes * | - | 143:26 minutes ** | -   
+
+\* with parallelization: 10 workers with maximum of 20 tasks until new worker is spawned
+
+\** no cuda-capable gpu -> calculations on the cpu
 
 # Outlook
 ## Header
