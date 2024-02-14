@@ -6,9 +6,6 @@ import statistics
 import os
 import regex as re
 
-
-from ultralyticsplus import YOLO, render_result
-
 from transformers import AutoImageProcessor, TableTransformerForObjectDetection
 
 if __name__ == '__main__':  
@@ -121,7 +118,7 @@ class TableExtractor:
             if d > 0:
                 diff.append(d)
 
-        return min(diff)-0.01 if self.determine_row_space == "min" else statistics.mode(diff)-0.1
+        return min(diff)-0.1 if self.determine_row_space == "min" else statistics.mode(diff)-0.1
 
     def merge_cells(self, pdfplumber_table, table, page):
         dot_lines = [x for x in table['lines'] if 'dot_line' in x.keys()]
@@ -170,7 +167,7 @@ class TableExtractor:
                 
                 continue         
 
-            try: chars = sorted([x for x in page.crop(cell).chars if x['text'] != ' '], key=lambda e: e['x0'])
+            try: chars = [x for x in page.crop(cell).chars if x['text'] != ' ']
             except: continue
 
             if len(chars) == 0:
@@ -296,9 +293,11 @@ class TableExtractor:
                 return None
             table = tables[table_index]
         
+        avg_char_height = statistics.mode([char['size'] for char in page.chars])
+
         page_crop = page.crop(table['bbox'])
         le = LayoutExtractor(table, page_crop, separate_units=self.separate_units)
-        col_sep, row_sep = le.find_layout(self.max_columns_space, self.determine_max_linepitch(page))
+        col_sep, row_sep = le.find_layout(self.max_columns_space, self.determine_max_linepitch(page), avg_char_height)
 
         table['settings'] = le.get_table_settings()
         pdfplumber_table = page_crop.find_table(table['settings'])
@@ -340,6 +339,9 @@ class TableExtractor:
                 if inp in ["y", "yes"]: image.save(name)
             else: image.save(name)
 
+        tf = None
+        le = None
+
         return table
 
     def extractTablesInPage(self, page_index, img_path=None, overwrite=False):
@@ -359,7 +361,7 @@ class TableExtractor:
         tf = TableFinder(page, model=self.model, image_processor=self.image_processor)
 
         image=None
-        if img_path is not None or self.find_method in ['model-based', 'microsoft']:
+        if img_path is not None or self.find_method == 'model-based':
             image = page.to_image(resolution=300)
 
         tables_found = tf.find_tables(find_method=self.find_method, image=image)
@@ -389,6 +391,8 @@ class TableExtractor:
                 inp = input("File already exists. Overwrite (yes/no)?\n")
                 if inp in ["y", "yes"]: image.save(name)
             else: image.save(name)
+
+        tf = None
         
         return extracted_tables
 
@@ -413,27 +417,16 @@ class TableExtractor:
         return extracted_tables
 
 if __name__ == '__main__':  
-    find_method = 'rule-based'
+    find_method = 'model-based'
 
     if find_method == 'model-based':
-        # load model
-        model = YOLO('keremberke/yolov8s-table-extraction')
-
-        # set model parameters
-        model.overrides['conf'] = 0.25  # NMS confidence threshold
-        model.overrides['iou'] = 0.45  # NMS IoU threshold
-        model.overrides['agnostic_nms'] = False  # NMS class-agnostic
-        model.overrides['max_det'] = 10  # maximum number of detections per image
-
-        image_processor = None
-    elif find_method == 'microsoft':
         image_processor = AutoImageProcessor.from_pretrained("microsoft/table-transformer-detection")
         model = TableTransformerForObjectDetection.from_pretrained("microsoft/table-transformer-detection")
     else :
         model = None    
         image_processor = None
     
-    te = TableExtractor(path="fintabnet/pdf/J/2009/page_88.pdf", separate_units=False, find_method=find_method, model=model, image_processor=image_processor, determine_row_space="min", max_column_space=6, max_row_space=2)
+    te = TableExtractor(path="fintabnet/pdf/AMZN/2005/page_74.pdf", separate_units=False, find_method=find_method, model=model, image_processor=image_processor, determine_row_space="min", max_column_space=5, max_row_space=2)
     tables = te.extractTables(img_path='.', overwrite=True)
     
     #dataframes = [te.tableToDataframe(table['pdfplumber_cells']['text']) for table in tables]

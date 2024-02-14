@@ -15,7 +15,6 @@ import time
 import shutil
 
 from transformers import AutoImageProcessor, TableTransformerForObjectDetection
-from ultralyticsplus import YOLO, render_result
 
 def getPdfPaths(path):
     pdfs = []
@@ -91,7 +90,7 @@ def proc(dataset_path, pdf_path, test_tables, draw, tol, find_method, model=None
     cell_match_list = []
     total_found_tables = 0
 
-    tableExtractor = TableExtractor(path=f"{dataset_path}/pdf/{pdf_path}", separate_units=False, find_method=find_method, model=model, image_processor=image_processor, determine_row_space="min", max_column_space=6, max_row_space=2)
+    tableExtractor = TableExtractor(path=f"{dataset_path}/pdf/{pdf_path}", separate_units=False, find_method=find_method, model=model, image_processor=image_processor, determine_row_space="min", max_column_space=4, max_row_space=2)
     try: tables = tableExtractor.extractTables(page_index=0) # all pdfs contain only one page
     except Exception as e: print(f"Error in {pdf_path}: {e}");return [0,0,0,0]
     page = tableExtractor.pages[0]
@@ -148,21 +147,11 @@ def proc(dataset_path, pdf_path, test_tables, draw, tol, find_method, model=None
             im.save(f"img/{pdf_path.replace('/', '_')[0:-4]}.png")
     except Exception as e:
         print(f"Drawing-Error in {pdf_path}: {e}")
-
+    tableExtractor = None
     return [len(match_list), len(mismatch_list), len(cell_match_list), total_found_tables]
 
 def test_parallel(pdf_paths, annotated_tables, draw='cell_match', tol=5, find_method='rule-based', thread_number=1):
     if find_method == 'model-based':
-        # load model
-        model = YOLO('keremberke/yolov8s-table-extraction')
-
-        # set model parameters
-        model.overrides['conf'] = 0.25  # NMS confidence threshold
-        model.overrides['iou'] = 0.45  # NMS IoU threshold
-        model.overrides['agnostic_nms'] = False  # NMS class-agnostic
-        model.overrides['max_det'] = 1000  # maximum number of detections per image
-        image_processor = None
-    elif find_method == 'microsoft':
         image_processor = AutoImageProcessor.from_pretrained("microsoft/table-transformer-detection")
         model = TableTransformerForObjectDetection.from_pretrained("microsoft/table-transformer-detection")
 
@@ -198,6 +187,7 @@ def test_parallel(pdf_paths, annotated_tables, draw='cell_match', tol=5, find_me
             total_mismatches += mismatch_list
             total_cell_matches += cell_match_list
             total_found_tables += tft
+            f = None
 
         return total_matches, total_mismatches, total_cell_matches, total_found_tables
                 
@@ -210,25 +200,6 @@ def loading_sequence(queue):
         i += 1
         if queue.empty() == False:
             break
-
-def memory(results, queue, results_queue):
-    total_matches = 0
-    total_mismatches = 0
-    total_cell_matches = 0
-    total_found_tables = 0
-
-    while queue.empty():
-        if results.empty():
-            time.sleep(0.1)
-            continue
-        r = results.get(timeout=1)
-        if r is not None:
-            total_matches += r[0]
-            total_mismatches += r[1]
-            total_cell_matches += r[2]
-            total_found_tables += r[3]
-
-    results_queue.put((total_matches, total_mismatches, total_cell_matches, total_found_tables))
 
 if __name__ == '__main__':
     s0 = time.time()
@@ -247,7 +218,7 @@ if __name__ == '__main__':
     sub_end = 1000
     thread_number = 10
 
-    find_method = 'microsoft'
+    find_method = 'model-based'
     
     annotated_tables, total = extractAnnotatedTables(dataset_path + "/all_tables.jsonl", sub_start=sub_start, sub_end=sub_end)   
     batch_size = int(total/thread_number)
@@ -260,7 +231,7 @@ if __name__ == '__main__':
 
     tol = 30
     
-    total_matches, total_mismatches, total_cell_matches, total_found_tables = test_parallel(pdf_paths, annotated_tables, draw='cell_match', tol=tol, find_method=find_method, thread_number=thread_number)
+    total_matches, total_mismatches, total_cell_matches, total_found_tables = test_parallel(pdf_paths, annotated_tables, draw='bbox_match', tol=tol, find_method=find_method, thread_number=thread_number)
 
     q.put(True)
 
@@ -272,12 +243,15 @@ if __name__ == '__main__':
     cell_recall = total_cell_matches / total
 
     print(f"Number of tables found: {total_found_tables}/{total}")
-    print(f"Precision:\t{total_matches}/{total_found_tables}\t{round(precision*100, 2)} %")
-    print(f"Recall:\t{total_matches}/{total}\t{round(recall*100, 2)} %")
-    print(f"F1-Score:\t{round((2*precision*recall)/(precision+recall), 2)}")
-    print(f"True positive with correct cells:\t\t{total_cell_matches}/{total_matches}\t{round(total_cell_matches/total_matches*100, 2)} %")
-    print(f"True positive with correct cells overall:\t{total_cell_matches}/{total_found_tables}\t{round(total_cell_matches/total_found_tables*100, 2)} %")
-    print(f"Cell F1-Score:\t{round((2*cell_precision*cell_recall)/(cell_precision+cell_recall), 2)}")
+    print(f"Precision (Number of matches / Number of found tables):\t{total_matches}/{total_found_tables}\t{round(precision*100, 2)} %")
+    print(f"Recall (Number of matches / Number of expected tables):\t{total_matches}/{total}\t{round(recall*100, 2)} %")
+    print(f"F1-Score:\t{round((2*precision*recall)/(precision+recall), 2)}\n")
+
+    print(f"Cell Precision (Number of tables with correct cells / Number of found Tables):\t{total_cell_matches}/{total_found_tables}\t{round(cell_precision*100, 2)} %")
+    print(f"Cell Recall (Number of tables with correct cells / Number of expected tables):\t{total_cell_matches}/{total}\t{round(cell_recall*100, 2)} %")
+    print(f"Cell F1-Score:\t{round((2*cell_precision*cell_recall)/(cell_precision+cell_recall), 2)}\n")
+
+    print(f"Number of tables with correct cells / Number of correct tables:\t{total_cell_matches}/{total_matches}\t{round(total_cell_matches/total_matches*100, 2)} %")
 
     s1 = time.time()
     print(f"{int((s1-s0) / 60)}:{int(s1-s0) % 60} minutes")
