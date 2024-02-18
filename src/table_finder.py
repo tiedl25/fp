@@ -72,6 +72,21 @@ class TableFinder:
 
 
         return chars[len(chars)-1]['bottom'] if len(chars) > 0 else bbox[1]
+
+
+    def extend_table_bottom(self, bbox):        
+        lines = self.page.crop(bbox).extract_text_lines()
+
+        i=0
+        while i < len(lines)-1:
+            diff = lines[i+1]['top'] - lines[i]['bottom']
+            if diff > 0:
+                if sum([x['width'] for x in self.page.crop([bbox[0], lines[i+1]['top'], bbox[2], lines[i+1]['bottom']]).chars]) > (bbox[2] - bbox[0]) * 0.7 or diff > 30:
+                    return lines[i]['bottom']
+            i+=1
+
+
+        return lines[-1]['bottom'] if len(lines) > 0 else bbox[1]
     
     def find_table_left(self, bbox, max_diff):
         """
@@ -184,19 +199,20 @@ class TableFinder:
         if len(lst) == 0:
             return concat_lines
         current_line = lst.pop(0)
-        current_line['segments'] = []
+        current_line['segments'] = [current_line.copy()]
 
         for line in lst:
             if current_line['top'] == line['top'] and line['x1'] > current_line['x1']:
                 current_line['x1'] = line['x1']
-                current_line['width'] = current_line['width'] + line['width']
+                #current_line['width'] = current_line['width'] + line['width']
                 current_line['pts'][1] = line['pts'][1]
-                if len(current_line['segments']) == 0: current_line['segments'] = [current_line]
-                else: current_line['segments'].append(line)
+                #if len(current_line['segments']) == 0: current_line['segments'] = [current_line]
+                current_line['segments'].append(line)
             else:
+                current_line['width'] = current_line['segments'][-1]['x1'] - current_line['segments'][0]['x0'] if len(current_line['segments']) > 0 else current_line['segments'][0]['width']
                 concat_lines.append(current_line)
                 current_line = line
-                current_line['segments'] = []
+                current_line['segments'] = [current_line.copy()]
 
         concat_lines.append(current_line) #append last line also to concat_lines
 
@@ -217,7 +233,7 @@ class TableFinder:
         lines = []
 
         for i, rect in enumerate(self.page.rects+self.page.curves):
-            if rect['height'] < 2 and rect['fill'] == True:
+            if rect['height'] < 10 and rect['fill'] == True:
                 rect['object_type'] = "line"
                 lines.append(rect)
 
@@ -404,7 +420,7 @@ class TableFinder:
 
         return len(objs) > 1 or sum_height > self.page.height * 0.3
             
-    def find_tables(self, bottom_threshold=5, top_threshold=4, left_threshold=2, right_threshold=2, find_method='rule-based', image=None):
+    def find_tables(self, bottom_threshold=5, top_threshold=4, left_threshold=2, right_threshold=2, find_method='rule-rule-based', image=None):
         """
         Finds tables in the given document based on certain thresholds.
         
@@ -426,13 +442,14 @@ class TableFinder:
         chars = sorted([x for x in self.page.chars if x['matrix'][1] == 0 and x['matrix'][2] == 0 and x['text'] != ' ' and x['x0'] >= self.page.bbox[0] and x['x1'] <= self.page.bbox[2]], key=lambda e: e['x0'])
         mid = (chars[0]['x0'] + chars[-1]['x1'])/2
         mid_chars = self.page.crop([mid, self.page.bbox[1], mid+3, self.page.bbox[3]], strict=False).chars
-        if sum(x['height'] for x in mid_chars) < self.page.height * 0.065:
+        two_column = sum(x['height'] for x in mid_chars) < self.page.height * 0.065
+        if two_column:
             self.lines = [x for x in self.lines if x['width'] < (chars[-1]['x1'] - chars[0]['x0']) * 0.5]
 
         all_lines = self.find_lines_of_dots() + self.lines
         all_lines.sort(key = lambda e: e['top'])
 
-        if find_method == 'rule-based':
+        if find_method == 'rule-rule-based':
             bottom_threshold = self.determine_average_line_height()
             for i, line in enumerate(all_lines):
                 if line['x0'] >= line['x1']:
@@ -444,8 +461,8 @@ class TableFinder:
                 if top >= bottom:
                     continue
 
-                if self.one_column_layout(top-top_threshold, bottom+bottom_threshold, mid):
-                    chars = sorted([x for x in self.page.crop(self.page.bbox).chars if x['matrix'][1] == 0 and x['matrix'][2] == 0], key=lambda e: e['x0'])
+                if not two_column or self.one_column_layout(top-top_threshold, bottom+bottom_threshold, mid):
+                    chars = sorted([x for x in self.page.chars if x['matrix'][1] == 0 and x['matrix'][2] == 0 and x['text'] != ' ' and x['x0'] >= self.page.bbox[0] and x['x1'] <= self.page.bbox[2]], key=lambda e: e['x0'])
                     left, right = chars[0]['x0'], chars[-1]['x1']
                 else: 
                     left = self.find_table_left([self.page.bbox[0], top, line['x0'], bottom], left_threshold)
@@ -454,34 +471,15 @@ class TableFinder:
                 bbox = self.extend_table([left, top, right, bottom])
 
                 # shrink the table on the left and right side
-                chars = sorted(self.page.crop(bbox).chars, key=lambda e: e['x0'])
-                left, right = chars[0]['x0'], chars[-1]['x1']
-                bbox[0], bbox[2] = left, right
+                #chars = sorted(self.page.crop(bbox).chars, key=lambda e: e['x0'])
+                #left, right = chars[0]['x0'], chars[-1]['x1']
+                #bbox[0], bbox[2] = left, right
 
                 table = {'bbox': bbox, 'lines': [line]}
 
                 self.tables.append(table)
 
-            #return self.tables
-            derived_tables = []
-            if (len(self.tables)>0):
-                while True:
-                    new_table = self.derive_tables()
-                    new_table['footer'] = new_table['bbox'][3]
-                    new_table['header'] = new_table['bbox'][1]
-                    derived_tables.append(new_table)
-                    if len(self.tables) == 0:
-                        break
-                    if len(self.tables) == 1:
-                        new_table = self.tables.pop(0)
-                        new_table['footer'] = new_table['bbox'][3]
-                        new_table['header'] = new_table['bbox'][1]
-                        derived_tables.append(new_table)
-                        break
-
-                self.tables = derived_tables
-
-        elif find_method == 'model-based' and self.model is not None and image is not None and self.image_processor is not None:
+        elif find_method in ['model-model-based', 'model-rule-based'] and self.model is not None and image is not None and self.image_processor is not None:
             inputs = self.image_processor(images=image.original, return_tensors="pt")
             outputs = self.model(**inputs)
 
@@ -509,50 +507,31 @@ class TableFinder:
                 table['header'] = table['bbox'][1]
                 self.tables.append(table)
 
-            derived_tables = self.tables
-
-            #a = self.tables[0]['bbox'].copy()
-            #a[0]-=10
-            #a[2]+=10
-            #a[1]-=10
-            #a[3]+=10
-            #image = self.page.crop(a).to_image(resolution=300)
-            #from transformers import AutoImageProcessor, TableTransformerForObjectDetection
-#
-            #structure_image_processor = AutoImageProcessor.from_pretrained("microsoft/table-transformer-structure-recognition")
-            #structure_model = TableTransformerForObjectDetection.from_pretrained("microsoft/table-transformer-structure-recognition")
-            #
-            #inputs = structure_image_processor(images=image.original, return_tensors="pt")
-            #outputs = structure_model(**inputs)
-#
-            ## convert outputs (bounding boxes and class logits) to Pascal VOC format (xmin, ymin, xmax, ymax)
-            #target_sizes = torch.tensor([(image.original.size[::-1][0]/image.scale, image.original.size[::-1][1]/image.scale)])
-            #results = structure_image_processor.post_process_object_detection(outputs, threshold=0.7, target_sizes=target_sizes)[0]
-            #t = self.tables[0]['bbox']
-            #boxes = []
-            #derived_tables = []
-            #for score, label, box in zip(results["scores"], results["labels"], results["boxes"]):
-            #    bbox = [a+b for a, b in zip([t[0], t[1], t[0], t[1]], box.tolist())] # reorder and scale
-            #    #bbox = self.extend_table(top_threshold=2, bottom_threshold=2, bbox=bbox)
-            #    boxes.append({'label': structure_model.config.id2label[label.item()], 'score': score.item(), 'bbox': bbox})
-
-            #derived_tables = []
-            #if (len(self.tables)>0):
-            #    while True:
-            #        new_table = self.derive_tables()
-            #        new_table['footer'] = new_table['bbox'][3]
-            #        new_table['header'] = new_table['bbox'][1]
-            #        derived_tables.append(new_table)
-            #        if len(self.tables) == 0:
-            #            break
-            #        if len(self.tables) == 1:
-            #            new_table = self.tables.pop(0)
-            #            new_table['footer'] = new_table['bbox'][3]
-            #            new_table['header'] = new_table['bbox'][1]
-            #            derived_tables.append(new_table)
-            #            break
-            #
-            #    self.tables = derived_tables
+            derived_tables = self.tables     
+        
+        derived_tables = []
+        if (len(self.tables)>0):
+            while True:
+                new_table = self.derive_tables()
+                new_table['footer'] = new_table['bbox'][3]
+                new_table['header'] = new_table['bbox'][1]
+                #old_box = new_table['bbox'].copy()
+                #new_table['bbox'][3] = self.extend_table_bottom([new_table['bbox'][0], new_table['bbox'][3], new_table['bbox'][2], self.page.bbox[3]])
+                ##new_table['bbox'][1] = self.extend_table_bottom([new_table['bbox'][0], self.page.bbox[1], new_table['bbox'][2], new_table['bbox'][3]])
+                #if new_table['bbox'] != old_box:
+                #    self.tables.insert(0, new_table)
+                #else:
+                derived_tables.append(new_table)
+                if len(self.tables) == 0:
+                    break
+                if len(self.tables) == 1:
+                    new_table = self.tables.pop(0)
+                    new_table['footer'] = new_table['bbox'][3]
+                    new_table['header'] = new_table['bbox'][1]
+                    derived_tables.append(new_table)
+                    break
+        
+            self.tables = derived_tables
             
         # Make sure that all the lines are within the table
         for t in derived_tables:
