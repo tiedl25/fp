@@ -358,7 +358,10 @@ class TableExtractor:
                     row_layout.append({'bbox': None, 'text': last_cell_text})
                 else:
                     bbox = self.shrink_cell(page, list(cell))
-                    text = page_crop.crop(bbox).extract_text(x_tolerance=2).replace('\n', ' ').replace(' . ', '').replace('..', '')
+                    if bbox == list(cell): 
+                        text = ''
+                    else:
+                        text = page_crop.crop(bbox).extract_text(x_tolerance=2).replace('\n', ' ').replace(' . ', '').replace('..', '')
                     row_layout.append({'bbox': bbox, 'text': text})
                     last_cell_text = text
             table_layout.append(row_layout)
@@ -468,7 +471,7 @@ if __name__ == '__main__':
         structure_image_processor = AutoImageProcessor.from_pretrained("microsoft/table-transformer-structure-recognition")
         structure_model = TableTransformerForObjectDetection.from_pretrained("microsoft/table-transformer-structure-recognition")       
     
-    te = TableExtractor(path="fintabnet/pdf/AMZN/2005/page_74.pdf", separate_units=False, detection_method=detection_method, layout_method=layout_method, model=model, image_processor=image_processor, layout_model=structure_model, layout_processor=structure_image_processor, determine_row_space="min", max_column_space=5, max_row_space=2)
+    te = TableExtractor(path="fintabnet/pdf/AIG/2012/page_331.pdf", separate_units=False, detection_method=detection_method, layout_method=layout_method, model=model, image_processor=image_processor, layout_model=structure_model, layout_processor=structure_image_processor, determine_row_space="min", max_column_space=5, max_row_space=2)
     tables = te.extractTables(img_path='.', overwrite=True)
     
     dataframes = [te.tableToDataframe(table) for table in tables]
