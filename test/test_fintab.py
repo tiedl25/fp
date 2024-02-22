@@ -48,7 +48,7 @@ def extractAnnotatedTables(path, sub_start=0, sub_end=-1):
 
     return test_tables_grouped, total
 
-def compare_cells(table, test_table, pdf_path, t_i, page):
+def compare_cells(table, test_table):
     matches = 0
     for cell in table['cells']:
         for test_cell in test_table['cells']:
@@ -58,18 +58,11 @@ def compare_cells(table, test_table, pdf_path, t_i, page):
                 break
 
     if matches == 0:
-        return None
+        return 0
 
     precision = matches / len(table['cells'])
     recall = matches / len(test_table['cells'])
-    f1 = (2*precision*recall)/(precision+recall)
-    #if matches > len(test_table['cells']) - 5:
-    #    return f"\t\t{pdf_path} Table {t_i+1}"
-    
-    if f1 > 0.7:
-        return f"\t\t{pdf_path} Table {t_i+1}"
-
-    return None
+    return (2*precision*recall)/(precision+recall)
 
 def restructure_cells(cells, page):
     restructured_cells = []
@@ -78,21 +71,35 @@ def restructure_cells(cells, page):
             cell['bbox'][0] < page.bbox[0] or cell['bbox'][1] < page.bbox[1] or cell['bbox'][2] > page.bbox[2] or cell['bbox'][3] > page.bbox[3]):
             continue
         bbox = [cell['bbox'][0], page.height-cell['bbox'][3], cell['bbox'][2], page.height-cell['bbox'][1]]
-        try: text = page.crop(bbox).extract_text().replace('\n', ' ')
+        try: text = page.crop(bbox).extract_text().replace('\n', ' ').replace('.', '')
         except: continue
         restructured_cells.append({'bbox': bbox, 'text': text})
     
     return restructured_cells
 
-def proc(dataset_path, pdf_path, test_tables, draw, tol, find_method, model=None, image_processor=None):
+def calculate_iou(box1, box2):
+    x1_min, y1_min, x1_max, y1_max = box1
+    x2_min, y2_min, x2_max, y2_max = box2
+
+    x_overlap = max(0, min(x1_max, x2_max) - max(x1_min, x2_min))
+    y_overlap = max(0, min(y1_max, y2_max) - max(y1_min, y2_min))
+
+    intersection_area = x_overlap * y_overlap
+    box1_area = (x1_max - x1_min) * (y1_max - y1_min)
+    box2_area = (x2_max - x2_min) * (y2_max - y2_min)
+
+    iou = intersection_area / (box1_area + box2_area - intersection_area)
+    return iou
+
+def proc(dataset_path, pdf_path, test_tables, draw, tol, detection_method, layout_method, model=None, image_processor=None, structure_model=None, structure_image_processor=None):
     match_list = []
     mismatch_list = []
     cell_match_list = []
     total_found_tables = 0
 
-    tableExtractor = TableExtractor(path=f"{dataset_path}/pdf/{pdf_path}", separate_units=False, find_method=find_method, model=model, image_processor=image_processor, determine_row_space="min", max_column_space=4, max_row_space=2)
+    tableExtractor = TableExtractor(path=f"{dataset_path}/pdf/{pdf_path}", separate_units=False, detection_method=detection_method, layout_method=layout_method, model=model, image_processor=image_processor, layout_model=structure_model, layout_processor=structure_image_processor, determine_row_space="min", max_column_space=4, max_row_space=2)
     try: tables = tableExtractor.extractTables(page_index=0) # all pdfs contain only one page
-    except Exception as e: print(f"Error in {pdf_path}: {e}");return [0,0,0,0]
+    except Exception as e: print(f"Error in {pdf_path}: {e}");return [0,0,0,0,0,0]
     page = tableExtractor.pages[0]
 
     # reorder table and bbox coordinates to match the structure of pdfplumber
@@ -102,20 +109,30 @@ def proc(dataset_path, pdf_path, test_tables, draw, tol, find_method, model=None
 
     match = True
     cell_match = True
+    f1_all = 0
+    not_found = 0
     for t_i, table in enumerate(tables):
         total_found_tables += 1
+        table['bbox'][3] = table['footer']
+        any_overlap = 0
         for test_table in test_tables:
-            table['bbox'][3] = table['footer']
-
-            if np.allclose(table['bbox'], test_table['bbox'], atol=tol):
-                match_list.append(f"\t{pdf_path} Table {t_i+1}")
-                tmp = compare_cells(table, test_table, pdf_path, t_i, page)
-                if tmp != None: cell_match_list.append(tmp)
+            #if np.allclose(table['bbox'], test_table['bbox'], atol=tol):
+            overlapping = calculate_iou(table['bbox'], test_table['bbox'])
+            if overlapping > 0:
+                any_overlap = overlapping
+            if overlapping > 0.7:
+                match_list.append(f"{pdf_path} Table {t_i+1}")
+                f1 = compare_cells(table, test_table)
+                f1_all += f1
+                if f1 > 0.7:
+                    cell_match_list.append(f"{pdf_path} Table {t_i+1}")
                 else: cell_match = False
-                break   
+                break
+                
         else:      
-            mismatch_list.append(f"\t{pdf_path} Table {t_i+1}")
+            mismatch_list.append(f"{pdf_path} Table {t_i+1}")
             match = False
+            if any_overlap == 0: not_found += 1
     
     if len(tables) == 0: 
         match = False
@@ -148,18 +165,26 @@ def proc(dataset_path, pdf_path, test_tables, draw, tol, find_method, model=None
     except Exception as e:
         print(f"Drawing-Error in {pdf_path}: {e}")
     tableExtractor = None
-    return [len(match_list), len(mismatch_list), len(cell_match_list), total_found_tables]
+    return [len(match_list), len(mismatch_list), len(cell_match_list), total_found_tables, f1_all, not_found]
 
-def test_parallel(pdf_paths, annotated_tables, draw='cell_match', tol=5, find_method='rule-based', thread_number=1):
-    if find_method == 'model-based':
+def test_parallel(pdf_paths, annotated_tables, draw='cell_match', tol=5, detection_method='rule-based', layout_method='rule-based', thread_number=1):
+    model = None
+    image_processor = None
+    structure_model = None
+    structure_image_processor = None
+
+    if detection_method == 'model-based':
         image_processor = AutoImageProcessor.from_pretrained("microsoft/table-transformer-detection")
         model = TableTransformerForObjectDetection.from_pretrained("microsoft/table-transformer-detection")
-
+    if layout_method == 'model-based':
+        structure_image_processor = AutoImageProcessor.from_pretrained("microsoft/table-transformer-structure-recognition")
+        structure_model = TableTransformerForObjectDetection.from_pretrained("microsoft/table-transformer-structure-recognition")    
+    
     i = 0
 
     results = []
 
-    with concurrent.futures.ProcessPoolExecutor(max_workers=thread_number if find_method == 'rule-based' else 1, max_tasks_per_child=20 if find_method == 'rule-based' else None) as executor:
+    with concurrent.futures.ProcessPoolExecutor(max_workers=thread_number if detection_method == 'rule-based' else 1, max_tasks_per_child=50 if detection_method == 'rule-based' else None) as executor:
 
         for pdf_path in pdf_paths:
             if i >= len(annotated_tables):
@@ -172,24 +197,28 @@ def test_parallel(pdf_paths, annotated_tables, draw='cell_match', tol=5, find_me
             if pdf_path < annotated_tables[i]['filename']:
                 continue
 
-            if find_method == 'rule-based': results.append(executor.submit(proc, dataset_path, pdf_path, annotated_tables[i]['tables'], draw, tol, find_method))
-            else: results.append(proc(dataset_path, pdf_path, annotated_tables[i]['tables'], draw, tol, find_method, model, image_processor))
+            if detection_method == 'rule-based': results.append(executor.submit(proc, dataset_path, pdf_path, annotated_tables[i]['tables'], draw, tol, detection_method, layout_method))
+            else: results.append(proc(dataset_path, pdf_path, annotated_tables[i]['tables'], draw, tol, detection_method, layout_method, model, image_processor, structure_model, structure_image_processor))
             i+=1
         
         total_matches = 0
         total_mismatches = 0
         total_cell_matches = 0
         total_found_tables = 0
+        f1_all = 0
+        not_found_all = 0
 
         for f in results:
-            match_list, mismatch_list, cell_match_list, tft = f.result() if find_method == 'rule-based' else f
+            match_list, mismatch_list, cell_match_list, tft, f1, not_found = f.result() if detection_method == 'rule-based' else f
             total_matches += match_list
             total_mismatches += mismatch_list
             total_cell_matches += cell_match_list
             total_found_tables += tft
+            f1_all += f1
+            not_found_all += not_found
             f = None
 
-        return total_matches, total_mismatches, total_cell_matches, total_found_tables
+        return total_matches, total_mismatches, total_cell_matches, total_found_tables, f1_all, not_found_all
                 
 def loading_sequence(queue):
     symbols = ['-', '\\', '|', '/']
@@ -212,15 +241,14 @@ if __name__ == '__main__':
     dataset_path = "fintabnet"
     pdf_paths = getPdfPaths(dataset_path + '/pdf')
 
-    #sub_start = 70000
-    #sub_end = 80000
     sub_start = 0
-    sub_end = 1000
+    sub_end = 10000
     thread_number = 10
 
-    find_method = 'model-based'
+    detection_method = 'rule-based'
+    layout_method = 'rule-based'
     
-    annotated_tables, total = extractAnnotatedTables(dataset_path + "/all_tables.jsonl", sub_start=sub_start, sub_end=sub_end)   
+    annotated_tables, total = extractAnnotatedTables(dataset_path + "/pdfs_with_all_tables_annotated.jsonl", sub_start=sub_start, sub_end=sub_end)   
     batch_size = int(total/thread_number)
     pdf_paths.sort()
 
@@ -231,7 +259,7 @@ if __name__ == '__main__':
 
     tol = 30
     
-    total_matches, total_mismatches, total_cell_matches, total_found_tables = test_parallel(pdf_paths, annotated_tables, draw='bbox_match', tol=tol, find_method=find_method, thread_number=thread_number)
+    total_matches, total_mismatches, total_cell_matches, total_found_tables, f1, not_found_all = test_parallel(pdf_paths, annotated_tables, draw='cell_match', tol=tol, detection_method=detection_method, layout_method=layout_method, thread_number=thread_number)
 
     q.put(True)
 
@@ -245,13 +273,16 @@ if __name__ == '__main__':
     print(f"Number of tables found: {total_found_tables}/{total}")
     print(f"Precision (Number of matches / Number of found tables):\t{total_matches}/{total_found_tables}\t{round(precision*100, 2)} %")
     print(f"Recall (Number of matches / Number of expected tables):\t{total_matches}/{total}\t{round(recall*100, 2)} %")
-    print(f"F1-Score:\t{round((2*precision*recall)/(precision+recall), 2)}\n")
+    print(f"F1-Score:\t{round((2*precision*recall)/(precision+recall), 3)}\n")
 
     print(f"Cell Precision (Number of tables with correct cells / Number of found Tables):\t{total_cell_matches}/{total_found_tables}\t{round(cell_precision*100, 2)} %")
     print(f"Cell Recall (Number of tables with correct cells / Number of expected tables):\t{total_cell_matches}/{total}\t{round(cell_recall*100, 2)} %")
-    print(f"Cell F1-Score:\t{round((2*cell_precision*cell_recall)/(cell_precision+cell_recall), 2)}\n")
+    print(f"Cell F1-Score:\t{round((2*cell_precision*cell_recall)/(cell_precision+cell_recall), 3)}")
+    print(f"Mean Cell F1-Score:\t{round(f1/total_matches, 3)}\n")
 
     print(f"Number of tables with correct cells / Number of correct tables:\t{total_cell_matches}/{total_matches}\t{round(total_cell_matches/total_matches*100, 2)} %")
+
+    print(f"Potential missing tables in fintabnet: {not_found_all}/{total_found_tables}")
 
     s1 = time.time()
     print(f"{int((s1-s0) / 60)}:{int(s1-s0) % 60} minutes")
