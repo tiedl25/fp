@@ -376,7 +376,7 @@ class LayoutExtractor:
             bbox[3] = segments[i+1]['bottom']
             try: 
                 cols = self.find_columns(self.clipping.crop(bbox), x_space, symbols)
-            except: 
+            except Exception as e: 
                 i+=1
                 continue
 
@@ -390,10 +390,10 @@ class LayoutExtractor:
 
     def find_model_layout(self, structure_model, structure_image_processor):
         table = self.table['bbox'].copy()
-        table[0]-=20
-        table[2]+=20
-        table[1]-=20
-        table[3]+=20
+        table[0]-=20 if table[0]-20 > self.clipping.parent_page.bbox[0] else self.clipping.parent_page.bbox[0]
+        table[2]+=20 if table[2]+20 < self.clipping.parent_page.bbox[2] else self.clipping.parent_page.bbox[2]
+        table[1]-=20 if table[1]-20 > self.clipping.parent_page.bbox[1] else self.clipping.parent_page.bbox[1]
+        table[3]+=20 if table[3]+20 < self.clipping.parent_page.bbox[3] else self.clipping.parent_page.bbox[3]
         image = self.clipping.parent_page.crop(table).to_image(resolution=300)
         
         inputs = structure_image_processor(images=image.original, return_tensors="pt")
@@ -401,7 +401,7 @@ class LayoutExtractor:
 
         # convert outputs (bounding boxes and class logits) to Pascal VOC format (xmin, ymin, xmax, ymax)
         target_sizes = torch.tensor([(image.original.size[::-1][0]/image.scale, image.original.size[::-1][1]/image.scale)])
-        results = structure_image_processor.post_process_object_detection(outputs, threshold=0.9, target_sizes=target_sizes)[0]
+        results = structure_image_processor.post_process_object_detection(outputs, threshold=0.7, target_sizes=target_sizes)[0]
 
         boxes = []
         derived_tables = []

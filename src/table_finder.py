@@ -72,22 +72,7 @@ class TableFinder:
 
 
         return chars[len(chars)-1]['bottom'] if len(chars) > 0 else bbox[1]
-
-
-    def extend_table_bottom(self, bbox):        
-        lines = self.page.crop(bbox).extract_text_lines()
-
-        i=0
-        while i < len(lines)-1:
-            diff = lines[i+1]['top'] - lines[i]['bottom']
-            if diff > 0:
-                if sum([x['width'] for x in self.page.crop([bbox[0], lines[i+1]['top'], bbox[2], lines[i+1]['bottom']]).chars]) > (bbox[2] - bbox[0]) * 0.7 or diff > 30:
-                    return lines[i]['bottom']
-            i+=1
-
-
-        return lines[-1]['bottom'] if len(lines) > 0 else bbox[1]
-    
+   
     def find_table_left(self, bbox, max_diff):
         """
         Find the left boundary of a table within the given bounding box.
@@ -413,14 +398,26 @@ class TableFinder:
             bool: True if the table lies in one column, False otherwise.
         """
         objs = self.page.crop([mid, top if top > self.page.bbox[1] else self.page.bbox[1], mid+3, bottom if bottom < self.page.bbox[3] else self.page.bbox[3]], strict=False)
-        objs = objs.chars + objs.lines + objs.rects
+        objs = objs.chars + [x for x in objs.lines if x['fill'] == True] + objs.rects
 
         mid_chars = self.page.crop([mid, self.page.bbox[1], mid+3, self.page.bbox[3]], strict=False).chars
         sum_height = sum(x['height'] for x in mid_chars)
 
         return len(objs) > 1 or sum_height > self.page.height * 0.3
+
+    def find_mid(self):
+        b = self.page.bbox
+        chars = sorted(self.page.crop([b[0]+100, b[1]+50, b[2]-100, b[3]-50]).chars, key=lambda e: e['x0'])
+
+        for i in range(len(chars)-1):
+            char = chars[i+1]
+            diff = char['x0'] - chars[i]['x1']
+
+            if diff > 5:
+                return chars[i]['x1']+diff/2
+        return None
             
-    def find_tables(self, bottom_threshold=5, top_threshold=4, left_threshold=2, right_threshold=2, find_method='rule-rule-based', image=None):
+    def find_tables(self, bottom_threshold=5, top_threshold=4, left_threshold=2, right_threshold=2, detection_method='rule-based', image=None):
         """
         Finds tables in the given document based on certain thresholds.
         
@@ -440,16 +437,19 @@ class TableFinder:
         self.lines = self.concat_line_segments(line_segments)
 
         chars = sorted([x for x in self.page.chars if x['matrix'][1] == 0 and x['matrix'][2] == 0 and x['text'] != ' ' and x['x0'] >= self.page.bbox[0] and x['x1'] <= self.page.bbox[2]], key=lambda e: e['x0'])
+
+        #mid = self.find_mid()
+        #if mid is None: 
         mid = (chars[0]['x0'] + chars[-1]['x1'])/2
         mid_chars = self.page.crop([mid, self.page.bbox[1], mid+3, self.page.bbox[3]], strict=False).chars
-        two_column = sum(x['height'] for x in mid_chars) < self.page.height * 0.065
+        two_column = sum(x['height'] for x in mid_chars) < self.page.height * 0.05
         if two_column:
             self.lines = [x for x in self.lines if x['width'] < (chars[-1]['x1'] - chars[0]['x0']) * 0.5]
 
         all_lines = self.find_lines_of_dots() + self.lines
         all_lines.sort(key = lambda e: e['top'])
 
-        if find_method == 'rule-rule-based':
+        if detection_method == 'rule-based':
             bottom_threshold = self.determine_average_line_height()
             for i, line in enumerate(all_lines):
                 if line['x0'] >= line['x1']:
@@ -479,7 +479,7 @@ class TableFinder:
 
                 self.tables.append(table)
 
-        elif find_method in ['model-model-based', 'model-rule-based'] and self.model is not None and image is not None and self.image_processor is not None:
+        elif detection_method == 'model-based' and self.model is not None and image is not None and self.image_processor is not None:
             inputs = self.image_processor(images=image.original, return_tensors="pt")
             outputs = self.model(**inputs)
 
