@@ -5,6 +5,8 @@ import copy
 import statistics
 import os
 import regex as re
+import numpy as np
+import json
 
 from transformers import AutoImageProcessor, TableTransformerForObjectDetection
 
@@ -18,14 +20,17 @@ else:
     except: from layout_extractor import LayoutExtractor
 
 class TableExtractor:
-    def __init__(self, path, separate_units=False, find_method='rule-based', model=None, image_processor=None, determine_row_space="min", max_column_space=5, max_row_space=2):
+    def __init__(self, path, separate_units=False, detection_method='rule-based', layout_method='rule-based', model=None, image_processor=None, layout_model=None, layout_processor=None, determine_row_space="min", max_column_space=5, max_row_space=-0.3):
         self.path = path
         pdf = pdfplumber.open(path)
         self.pages = pdf.pages
         self.separate_units = separate_units
-        self.find_method = find_method
+        self.detection_method = detection_method
+        self.layout_method = layout_method
         self.model = model
         self.image_processor = image_processor
+        self.layout_model = layout_model
+        self.layout_processor = layout_processor
         self.max_columns_space = max_column_space
         self.max_row_space = max_row_space
         self.determine_row_space = determine_row_space
@@ -40,22 +45,23 @@ class TableExtractor:
         Returns:
             pandas.DataFrame: The converted table as a DataFrame.
         """
-        tuples = []
-        i=0
-        header = table[0]
-        while i < len(header):
-            if header[i] != None and (i+1 == len(header) or header[i+1] != None):
-                tuples.append((header[i], ''))
-            elif header[i] != None:
-                tuples.extend([(header[i], ''), (header[i], '')])
-                header.pop(i+1)
-            i+=1
-    
-        columns = pd.MultiIndex.from_tuples(tuples)
 
-        return pd.DataFrame(table[1:], columns=columns)
+        header = table['header']
+        layout = table['layout'].copy()
+        t = []
+        for row in layout:
+            if row[0]['bbox'][3] <= header:
+                if len(t) == 0:
+                    t.append([x['text'] for x in row])
+                else:
+                    for i, cell in enumerate(row):
+                        t[0][i] += ' ' + cell['text']
+            else:
+                t.append([x['text'] for x in row])
+
+        return pd.DataFrame(t[1:], columns=t[0])
     
-    def export(self, format, path, dataframe=None, table=None):
+    def export(self, format, path, dataframe=None, table=None, overwrite=False):
         """
         Export data to a file in the specified format.
 
@@ -72,13 +78,21 @@ class TableExtractor:
             None: If an invalid format is provided.
             None: If an error occurs during the export process.
         """
+
+        if os.path.exists(f"{path}.{format if format != 'excel' else 'xlsx'}") and overwrite==False:
+            inp = input("File already exists. Overwrite (yes/no)?\n")
+            if inp not in ["y", "yes"]: return
+
+        if format == "json":
+            return json.dump(table, open(f'{path}.json', 'w'))
+
         if dataframe is None:
             if table is None:
                 return
             dataframe = self.tableToDataframe(table)
 
         if format == 'excel':
-            return dataframe.to_excel(f'{path}.xlsx')    
+            return dataframe.to_excel(f'{path}.xlsx', index=False)    
         elif format == 'csv':
             return dataframe.to_latex(f'{path}.csv', index=False)      
 
@@ -93,16 +107,16 @@ class TableExtractor:
         Returns:
             list: The coordinates of the smallest bounding box in the format [x0, y0, x1, y1].
         """
-        cell[0]+=0.1
-        cell[1]+=0.1
-        cell[2]-=0.1
-        cell[3]-=0.1
+        cell[0]+=0.2
+        cell[1]+=0.5
+        cell[2]-=0.2
+        cell[3]-=0.5
         pagecrop = [x for x in page.crop(cell).chars if x['text'] not in [' ', '.']] # remove white spaces and dots because they should not be part of the cell
 
-        b1 = min(pagecrop, key=lambda e: e['x0'], default={'x0': cell[0]-0.1})
-        b2 = min(pagecrop, key=lambda e: e['top'], default={'top': cell[1]-0.1})
-        b3 = max(pagecrop, key=lambda e: e['x1'], default={'x1': cell[2]+0.1})
-        b4 = max(pagecrop, key=lambda e: e['bottom'], default={'bottom': cell[3]+0.1})
+        b1 = min(pagecrop, key=lambda e: e['x0'], default={'x0': cell[0]-0.2})
+        b2 = min(pagecrop, key=lambda e: e['top'], default={'top': cell[1]-0.5})
+        b3 = max(pagecrop, key=lambda e: e['x1'], default={'x1': cell[2]+0.2})
+        b4 = max(pagecrop, key=lambda e: e['bottom'], default={'bottom': cell[3]+0.5})
 
         return [b1['x0'], b2['top'], b3['x1'], b4['bottom']]
 
@@ -180,6 +194,10 @@ class TableExtractor:
                     i+=1
                     continue
 
+                if chars[0]['x0'] - table['bbox'][0] > 10 and np.isclose(chars[0]['x0']-cell[0], cell[2]-chars[-1]['x1'], 0.3):
+                    i+=1
+                    continue
+
                 intersecting_dot_lines = [dot_line for dot_line in dot_lines if cell[0] < dot_line['x0'] < cell[2] and cell[1] <= dot_line['top'] < dot_line['bottom'] <= cell[3]]
                 if len(intersecting_dot_lines) > 0:
                     i+=1
@@ -202,6 +220,11 @@ class TableExtractor:
                 if chars[0]['fontname'] != next_row_char[0]['fontname'] or min([x['top'] for x in next_row_char]) - max([x['bottom'] for x in chars]) > self.max_columns_space * 1.5:
                     i+=1
                     continue
+
+                #intersecting_dot_lines = [dot_line for dot_line in dot_lines if next_cell[0] < dot_line['x0'] < next_cell[2] and next_cell[1] <= dot_line['top'] < dot_line['bottom'] <= next_cell[3]]
+                #if chars[0]['x0'] < next_row_char[0]['x0']-1 and len(intersecting_dot_lines) == 0:
+                #    i+=1
+                #    continue
 
                 bbox = table['bbox'].copy()
                 bbox[3] = next_cell[3]
@@ -266,7 +289,6 @@ class TableExtractor:
             else:
                 i+=1
 
-
     def extractTable(self, page, table_index=0, table=None, img_path=None, image=None, overwrite=False):
         """
         Extracts a table from a given page. Either by rule-based or custom method based on pdfplumbers table extraction.
@@ -287,7 +309,7 @@ class TableExtractor:
         if table == None:
             page = copy.copy(self.pages[0])
             tf = TableFinder(page, model=self.model, image_processor=self.image_processor)
-            tables = tf.find_tables(find_method=self.find_method, image=image if image is not None else page.to_image(resolution=300))
+            tables = tf.find_tables(detection_method=self.detection_method, image=image if image is not None else page.to_image(resolution=300))
 
             if table_index >= len(tables):
                 return None
@@ -295,23 +317,28 @@ class TableExtractor:
         
         avg_char_height = statistics.mode([char['size'] for char in page.chars])
 
-        page_crop = page.crop(table['bbox'])
+        try: page_crop = page.crop(table['bbox'])
+        except: return None
         le = LayoutExtractor(table, page_crop, separate_units=self.separate_units)
-        col_sep, row_sep = le.find_layout(self.max_columns_space, self.determine_max_linepitch(page), avg_char_height)
+        if self.layout_model is None and self.layout_processor is None: 
+            col_sep, row_sep = le.find_layout(self.max_columns_space, self.determine_max_linepitch(page), avg_char_height)
+        else:
+            col_sep, row_sep = le.find_model_layout(self.layout_model, self.layout_processor)
 
         table['settings'] = le.get_table_settings()
         pdfplumber_table = page_crop.find_table(table['settings'])
         if pdfplumber_table == None or len(pdfplumber_table.rows) <= 2 or len(col_sep) == 0:
             return None
 
-        self.merge_cells(pdfplumber_table, table, page)
+        if self.layout_method != 'model-based': self.merge_cells(pdfplumber_table, table, page)
 
         table_cells = []
+        
         for cell in sorted(pdfplumber_table.cells, key=lambda e: e[1]): 
             bbox = self.shrink_cell(page, list(cell))
             if bbox == list(cell): continue
             try: 
-                text = page_crop.crop(bbox).extract_text().replace('\n', ' ')
+                text = page_crop.crop(bbox).extract_text().replace('\n', ' ').replace(' . ', '').replace('..', '')
                 if text == '':
                     continue
                 if len(table_cells) > 0 and table_cells[-1]['text'] == "$":
@@ -322,11 +349,24 @@ class TableExtractor:
             except:
                 continue
 
+        table_layout = []
+        for row in pdfplumber_table.rows:
+            row_layout = []
+            last_cell_text = ''
+            for cell in row.cells:
+                if cell is None:
+                    row_layout.append({'bbox': None, 'text': last_cell_text})
+                else:
+                    bbox = self.shrink_cell(page, list(cell))
+                    text = page_crop.crop(bbox).extract_text(x_tolerance=2).replace('\n', ' ').replace(' . ', '').replace('..', '')
+                    row_layout.append({'bbox': bbox, 'text': text})
+                    last_cell_text = text
+            table_layout.append(row_layout)
+
+        table['layout'] = table_layout
+
         # reformatted cells
         table['cells'] = table_cells
-
-        # original cells
-        table['pdfplumber_cells'] = {'cells': pdfplumber_table.cells, 'text': pdfplumber_table.extract(x_tolerance=2)}
 
         if img_path is not None: 
             image = page_crop.to_image(resolution=300)
@@ -361,10 +401,10 @@ class TableExtractor:
         tf = TableFinder(page, model=self.model, image_processor=self.image_processor)
 
         image=None
-        if img_path is not None or self.find_method == 'model-based':
+        if img_path is not None or self.detection_method == 'model-based' or self.layout_method == 'model-based':
             image = page.to_image(resolution=300)
 
-        tables_found = tf.find_tables(find_method=self.find_method, image=image)
+        tables_found = tf.find_tables(detection_method=self.detection_method, image=image)
 
         for table_index, tablebox in enumerate(tables_found):
             table = self.extractTable(page, table_index=table_index, table=tablebox, image=image)
@@ -375,18 +415,14 @@ class TableExtractor:
             if img_path is None:
                 continue
 
-            #image.draw_hlines([x['top'] for x in table['lines']], stroke_width=3, stroke=(230, 65, 67, 65)) # redraw existing lines
-            #image.debug_tablefinder(table['settings'])
             image.draw_rect(table['bbox'])
             image.draw_rects(x['bbox'] for x in table['cells'])
-            #image.draw_rects([x for x in table['pdfplumber_cells']['cells']])
             image.draw_hline(table['footer'])
             image.draw_hline(table['header'])
-            #image.draw_vline((max(page.chars, key=lambda e: e['x1'])['x1'] + min(page.chars, key=lambda e: e['x0'])['x0'])/2)
         
         if img_path is not None: 
             if not os.path.exists(img_path): os.mkdir(img_path)
-            name = f'{img_path}/{os.path.basename(self.path)[0:-4]}_page_{page_index}.png'
+            name = f'{img_path}/{self.path.replace("/", "_")[0:-4]}_page_{page_index}.png'
             if os.path.exists(name) and overwrite==False:
                 inp = input("File already exists. Overwrite (yes/no)?\n")
                 if inp in ["y", "yes"]: image.save(name)
@@ -417,17 +453,24 @@ class TableExtractor:
         return extracted_tables
 
 if __name__ == '__main__':  
-    find_method = 'model-based'
+    detection_method = 'rule-based'
+    layout_method = 'rule-based'
 
-    if find_method == 'model-based':
+    model = None
+    image_processor = None
+    structure_model = None
+    structure_image_processor = None
+
+    if detection_method == 'model-based':
         image_processor = AutoImageProcessor.from_pretrained("microsoft/table-transformer-detection")
         model = TableTransformerForObjectDetection.from_pretrained("microsoft/table-transformer-detection")
-    else :
-        model = None    
-        image_processor = None
+    if layout_method == 'model-based':
+        structure_image_processor = AutoImageProcessor.from_pretrained("microsoft/table-transformer-structure-recognition")
+        structure_model = TableTransformerForObjectDetection.from_pretrained("microsoft/table-transformer-structure-recognition")       
     
-    te = TableExtractor(path="fintabnet/pdf/AMZN/2005/page_74.pdf", separate_units=False, find_method=find_method, model=model, image_processor=image_processor, determine_row_space="min", max_column_space=5, max_row_space=2)
+    te = TableExtractor(path="fintabnet/pdf/AMZN/2005/page_74.pdf", separate_units=False, detection_method=detection_method, layout_method=layout_method, model=model, image_processor=image_processor, layout_model=structure_model, layout_processor=structure_image_processor, determine_row_space="min", max_column_space=5, max_row_space=2)
     tables = te.extractTables(img_path='.', overwrite=True)
     
-    #dataframes = [te.tableToDataframe(table['pdfplumber_cells']['text']) for table in tables]
-    #for i, df in enumerate(dataframes): te.export('excel', f'excel/test_{i}', dataframe=df)
+    dataframes = [te.tableToDataframe(table) for table in tables]
+    if not os.path.exists("excel"): os.mkdir("excel")
+    for i, df in enumerate(dataframes): te.export('excel', f'excel/test_{i}', dataframe=df)
