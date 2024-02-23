@@ -62,7 +62,7 @@ class LayoutExtractor:
         # return the top of the table if nothing is intersecting
         return self.clipping.bbox[1]
 
-    def find_columns(self, clipping, max_diff, special_symbols=[' ', '.', '%', '$', 'cid:127', '•', '\n', '\t'], font_diff=True):
+    def find_columns(self, clipping, max_diff, special_symbols=[' ', '.', '\n', '\t'], font_diff=True, after_symbols=['%'], before_symbols=['$', '€', '¥', '£', '₤']):
         '''
             Define new column separator if the vertical distance between two characters is greater than max_diff or if the font changes.
             The headerline has often also another font, that creates problems with multiple column dividers where they not belong. 
@@ -73,12 +73,20 @@ class LayoutExtractor:
         separator = []
 
         for i in range(len(chars)-1):
-            char = chars[i+1]
-            diff = char['x0'] - chars[i]['x1']
+            char = chars[i]
+            next_char = chars[i+1]
+            diff = next_char['x0'] - char['x1']
 
-            if diff > max_diff or (font_diff and diff > 3 and char['fontname'] != chars[i]['fontname']):
-                
-                separator_x = char['x0']-(diff/2)
+            if (char['text'] in before_symbols and next_char['text'] not in before_symbols or
+                (next_char['text'] in after_symbols and char['text'] not in after_symbols) or
+                char['text'] == '-' or next_char['text'] == '-'):
+                continue
+
+            if (diff > max_diff or (font_diff and diff > 3 and next_char['fontname'] != char['fontname']) or
+                (diff > 1 and next_char['text'] in before_symbols and char['text'] not in before_symbols) or
+                (diff > 1 and char['text'] in after_symbols and next_char['text'] not in after_symbols)):
+
+                separator_x = next_char['x0']-(diff/2)
 
                 bottom = clipping.bbox[3]
 
@@ -197,7 +205,7 @@ class LayoutExtractor:
                 continue
             
             clip = self.clipping.crop(bbox)
-            cols = self.find_columns(clip, 2*x_space, special_symbols=[' ', 'cid:127', '•'], font_diff=False)
+            cols = self.find_columns(clip, 2*x_space, font_diff=False, before_symbols=[], after_symbols=[])
             words = clip.extract_words()
             #width = max([w['x1'] for w in words], default=self.clipping.bbox[2]) - min([w['x0'] for w in words], default=self.clipping.bbox[0])
             leading_space = words[0]['x0'] - bbox[0] if len(words) > 0 else self.clipping.width
@@ -246,7 +254,7 @@ class LayoutExtractor:
                 continue
             
             clip = self.clipping.crop(bbox)
-            cols = self.find_columns(clip, 3*x_space, special_symbols=[' ', 'cid:127', '•'], font_diff=False)
+            cols = self.find_columns(clip, 3*x_space, font_diff=False, before_symbols=[], after_symbols=[])
             words = clip.extract_words()
             #width = max([w['x1'] for w in words], default=self.clipping.bbox[2]) - min([w['x0'] for w in words], default=self.clipping.bbox[0])
             leading_space = words[0]['x0'] - bbox[0] if len(words) > 0 else self.clipping.width
@@ -307,7 +315,7 @@ class LayoutExtractor:
                 self.column_separator.pop(i+1)
             i+=1
 
-    def find_layout(self, x_space, y_space=-0.3, symbols=[' ', '.', '%', 'cid:127', '•']):
+    def find_layout(self, x_space, y_space=-0.3, symbols=[' ', '.', '\n', '\t']):
         """
         Find the layout of the table based on the provided x and y spaces and symbols.
 
@@ -434,7 +442,7 @@ if __name__ == '__main__':
         table_clip = page.crop(tables[0]['bbox'])
 
     le = LayoutExtractor(tables[0], table_clip)
-    footnote_complete, column_separator, row_separator = le.find_layout(5, 2, ['$', '%'])
+    footnote_complete, column_separator, row_separator = le.find_layout(4, -0.3, ['$', '%'])
         
     im = table_clip.to_image(resolution=300)
 

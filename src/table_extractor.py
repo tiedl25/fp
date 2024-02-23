@@ -20,7 +20,7 @@ else:
     except: from layout_extractor import LayoutExtractor
 
 class TableExtractor:
-    def __init__(self, path, separate_units=False, detection_method='rule-based', layout_method='rule-based', model=None, image_processor=None, layout_model=None, layout_processor=None, max_column_space=5, max_row_space=-0.3):
+    def __init__(self, path, separate_units=False, detection_method='rule-based', layout_method='rule-based', model=None, image_processor=None, layout_model=None, layout_processor=None, max_column_space=4, max_row_space=-0.3):
         self.path = path
         pdf = pdfplumber.open(path)
         self.pages = pdf.pages
@@ -180,7 +180,8 @@ class TableExtractor:
                 if chars[-1]['text'] == ':':
                     i+=1
                     continue
-
+                
+                # text in line is centered
                 if chars[0]['x0'] - table['bbox'][0] > 10 and np.isclose(chars[0]['x0']-cell[0], cell[2]-chars[-1]['x1'], 0.3):
                     i+=1
                     continue
@@ -326,10 +327,6 @@ class TableExtractor:
                 text = page_crop.crop(bbox).extract_text().replace('\n', ' ').replace('.', '')
                 if text == '':
                     continue
-                if len(table_cells) > 0 and table_cells[-1]['text'] == "$":
-                    table_cells[-1]['text'] += f" {text}"
-                    table_cells[-1]['bbox'][2] = bbox[2]
-                    continue
                 table_cells.append({'bbox': bbox, 'text': text, 'original_bbox': cell})
             except:
                 continue
@@ -456,7 +453,7 @@ if __name__ == '__main__':
         structure_image_processor = AutoImageProcessor.from_pretrained("microsoft/table-transformer-structure-recognition")
         structure_model = TableTransformerForObjectDetection.from_pretrained("microsoft/table-transformer-structure-recognition")       
     
-    te = TableExtractor(path="fintabnet/pdf/ADBE/2018/page_53.pdf", separate_units=False, detection_method=detection_method, layout_method=layout_method, model=model, image_processor=image_processor, layout_model=structure_model, layout_processor=structure_image_processor, max_column_space=5, max_row_space=-0.3)
+    te = TableExtractor(path="examples/pdf/FDX/2017/page_29.pdf", separate_units=False, detection_method=detection_method, layout_method=layout_method, model=model, image_processor=image_processor, layout_model=structure_model, layout_processor=structure_image_processor, max_column_space=4, max_row_space=-0.3)
     tables = te.extractTables(img_path='.', overwrite=True)
     
     dataframes = [te.tableToDataframe(table) for table in tables]
