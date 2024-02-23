@@ -97,7 +97,7 @@ def proc(dataset_path, pdf_path, test_tables, draw, tol, detection_method, layou
     cell_match_list = []
     total_found_tables = 0
 
-    tableExtractor = TableExtractor(path=f"{dataset_path}/pdf/{pdf_path}", separate_units=False, detection_method=detection_method, layout_method=layout_method, model=model, image_processor=image_processor, layout_model=structure_model, layout_processor=structure_image_processor, determine_row_space="min", max_column_space=4, max_row_space=2)
+    tableExtractor = TableExtractor(path=f"{dataset_path}/pdf/{pdf_path}", separate_units=False, detection_method=detection_method, layout_method=layout_method, model=model, image_processor=image_processor, layout_model=structure_model, layout_processor=structure_image_processor, determine_row_space="min", max_column_space=4, max_row_space=-0.3)
     try: tables = tableExtractor.extractTables(page_index=0) # all pdfs contain only one page
     except Exception as e: print(f"Error in {pdf_path}: {e}");return [0,0,0,0,0,0]
     page = tableExtractor.pages[0]

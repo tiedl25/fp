@@ -3,13 +3,10 @@ import pdfplumber
 import statistics
 import itertools
 import torch
-import numpy as np
 
 class TableFinder:
     def __init__(self, page, model=None, image_processor=None) -> None:
         self.page = page
-        # TODO
-        #self.page.bbox = self.page.layout.bbox
         self.lines = page.lines
         self.tables = []
         self.model = model
@@ -218,7 +215,7 @@ class TableFinder:
         lines = []
 
         for i, rect in enumerate(self.page.rects+self.page.curves):
-            if rect['height'] < 10 and rect['fill'] == True:
+            if rect['height'] < 5 and rect['fill'] == True:
                 rect['object_type'] = "line"
                 lines.append(rect)
 
@@ -469,11 +466,6 @@ class TableFinder:
                     right = self.find_table_right([line['x1'], top, self.page.bbox[2], bottom], right_threshold)
 
                 bbox = self.extend_table([left, top, right, bottom])
-
-                # shrink the table on the left and right side
-                #chars = sorted(self.page.crop(bbox).chars, key=lambda e: e['x0'])
-                #left, right = chars[0]['x0'], chars[-1]['x1']
-                #bbox[0], bbox[2] = left, right
 
                 table = {'bbox': bbox, 'lines': [line]}
 

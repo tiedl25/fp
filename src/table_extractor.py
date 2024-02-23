@@ -20,7 +20,7 @@ else:
     except: from layout_extractor import LayoutExtractor
 
 class TableExtractor:
-    def __init__(self, path, separate_units=False, detection_method='rule-based', layout_method='rule-based', model=None, image_processor=None, layout_model=None, layout_processor=None, determine_row_space="min", max_column_space=5, max_row_space=-0.3):
+    def __init__(self, path, separate_units=False, detection_method='rule-based', layout_method='rule-based', model=None, image_processor=None, layout_model=None, layout_processor=None, max_column_space=5, max_row_space=-0.3):
         self.path = path
         pdf = pdfplumber.open(path)
         self.pages = pdf.pages
@@ -31,9 +31,8 @@ class TableExtractor:
         self.image_processor = image_processor
         self.layout_model = layout_model
         self.layout_processor = layout_processor
-        self.max_columns_space = max_column_space
+        self.max_column_space = max_column_space
         self.max_row_space = max_row_space
-        self.determine_row_space = determine_row_space
 
     def tableToDataframe(self, table):
         """
@@ -90,11 +89,13 @@ class TableExtractor:
             if table is None:
                 return
             dataframe = self.tableToDataframe(table)
-
-        if format == 'excel':
-            return dataframe.to_excel(f'{path}.xlsx', index=False)    
-        elif format == 'csv':
-            return dataframe.to_latex(f'{path}.csv', index=False)      
+        try:
+            if format == 'excel':
+                return dataframe.to_excel(f'{path}.xlsx', index=False)    
+            elif format == 'csv':
+                return dataframe.to_latex(f'{path}.csv', index=False)     
+        except:
+            print('Different number of cells in rows of body and header.')
 
     def shrink_cell(self, page, cell):
         """
@@ -119,20 +120,6 @@ class TableExtractor:
         b4 = max(pagecrop, key=lambda e: e['bottom'], default={'bottom': cell[3]+0.5})
 
         return [b1['x0'], b2['top'], b3['x1'], b4['bottom']]
-
-    def determine_max_linepitch(self, page):
-        if self.determine_row_space == "value": return self.max_row_space
-
-        chars = sorted(page.chars, key=lambda e: e['top'])
-        chars = [char for char in chars if char['text'] != ' ']
-
-        diff = []
-        for i in range(len(chars)-1):
-            d = chars[i+1]['top'] - chars[i]['bottom']
-            if d > 0:
-                diff.append(d)
-
-        return min(diff)-0.1 if self.determine_row_space == "min" else statistics.mode(diff)-0.1
 
     def merge_cells(self, pdfplumber_table, table, page):
         dot_lines = [x for x in table['lines'] if 'dot_line' in x.keys()]
@@ -217,7 +204,7 @@ class TableExtractor:
                     i+=1
                     continue
 
-                if chars[0]['fontname'] != next_row_char[0]['fontname'] or min([x['top'] for x in next_row_char]) - max([x['bottom'] for x in chars]) > self.max_columns_space * 1.5:
+                if chars[0]['fontname'] != next_row_char[0]['fontname'] or min([x['top'] for x in next_row_char]) - max([x['bottom'] for x in chars]) > self.max_column_space * 1.5:
                     i+=1
                     continue
 
@@ -263,7 +250,7 @@ class TableExtractor:
                     i+=1
                     continue
 
-                if chars[0]['fontname'] != previous_row_char[0]['fontname'] or min([x['top'] for x in chars]) - max([x['bottom'] for x in previous_row_char]) > self.max_columns_space * 1.5:
+                if chars[0]['fontname'] != previous_row_char[0]['fontname'] or min([x['top'] for x in chars]) - max([x['bottom'] for x in previous_row_char]) > self.max_column_space * 1.5:
                     i+=1
                     continue
                 
@@ -315,13 +302,11 @@ class TableExtractor:
                 return None
             table = tables[table_index]
         
-        avg_char_height = statistics.mode([char['size'] for char in page.chars])
-
         try: page_crop = page.crop(table['bbox'])
         except: return None
         le = LayoutExtractor(table, page_crop, separate_units=self.separate_units)
         if self.layout_model is None and self.layout_processor is None: 
-            col_sep, row_sep = le.find_layout(self.max_columns_space, self.determine_max_linepitch(page), avg_char_height)
+            col_sep, row_sep = le.find_layout(self.max_column_space, self.max_row_space)
         else:
             col_sep, row_sep = le.find_model_layout(self.layout_model, self.layout_processor)
 
@@ -471,7 +456,7 @@ if __name__ == '__main__':
         structure_image_processor = AutoImageProcessor.from_pretrained("microsoft/table-transformer-structure-recognition")
         structure_model = TableTransformerForObjectDetection.from_pretrained("microsoft/table-transformer-structure-recognition")       
     
-    te = TableExtractor(path="fintabnet/pdf/ADBE/2018/page_53.pdf", separate_units=False, detection_method=detection_method, layout_method=layout_method, model=model, image_processor=image_processor, layout_model=structure_model, layout_processor=structure_image_processor, determine_row_space="min", max_column_space=5, max_row_space=2)
+    te = TableExtractor(path="fintabnet/pdf/ADBE/2018/page_53.pdf", separate_units=False, detection_method=detection_method, layout_method=layout_method, model=model, image_processor=image_processor, layout_model=structure_model, layout_processor=structure_image_processor, max_column_space=5, max_row_space=-0.3)
     tables = te.extractTables(img_path='.', overwrite=True)
     
     dataframes = [te.tableToDataframe(table) for table in tables]

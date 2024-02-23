@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 import pdfplumber
-import copy
-import statistics
 import numpy as np
 import re
 import torch
@@ -97,7 +95,7 @@ class LayoutExtractor:
 
         return separator
 
-    def find_rows(self, clipping, max_diff, avg_height):
+    def find_rows(self, clipping, max_diff):
         '''
             Define new row separator if the horizontal distance between two characters is greater than max_diff. 
             Also detect, if a footnote exists and thus separate it from the rest of the table.
@@ -110,7 +108,7 @@ class LayoutExtractor:
             diff = chars[i+1]['top'] - chars[i]['bottom']
             avg = (chars[i]['bottom'] + chars[i+1]['top']) / 2
 
-            if diff > -0.3:
+            if diff > max_diff:
                 left = self.table['bbox'][0]
                 right = self.table['bbox'][2]
                 line = {'x0': left, 'top': avg, 'x1': right, 'bottom': avg, 'object_type': 'line', 'width': right-left}
@@ -280,25 +278,12 @@ class LayoutExtractor:
         while i < len(self.column_separator)-1:
             l1 = self.column_separator[i]
             l2 = self.column_separator[i+1]
-            #if l1['top'] == l2['top'] and l1['bottom'] == l2['bottom']:
 
             if l1['x0'] == l2['x0']:
                 i+=1
                 continue
             min_bottom = min(l1['bottom'], l2['bottom'])
-            #max_bottom = max(l1['bottom'], l2['bottom'])
-            #min_top = min(l1['top'], l2['top'])
             max_top = max(l1['top'], l2['top'])
-            #try: 
-            #    chars = self.clipping.crop([l1['x0'], min_top+1, l2['x1'], max_bottom-1]).chars
-            #    if len([x for x in chars if x['text'] not in [' ', '\n', '$']]) == 0:
-            #        l1['top'] = min_top
-            #        l1['bottom'] = max_bottom
-            #        self.column_separator.pop(i+1)
-            #        continue
-            #except:
-            #    i+=1
-            #    continue
             if max_top >= min_bottom-2:
                 i+=1
                 continue
@@ -322,7 +307,7 @@ class LayoutExtractor:
                 self.column_separator.pop(i+1)
             i+=1
 
-    def find_layout(self, x_space, y_space, avg_char_height, symbols=[' ', '.', '%', 'cid:127', '•']):
+    def find_layout(self, x_space, y_space=-0.3, symbols=[' ', '.', '%', 'cid:127', '•']):
         """
         Find the layout of the table based on the provided x and y spaces and symbols.
 
@@ -338,7 +323,7 @@ class LayoutExtractor:
         self.column_separator = []
 
         # find rows and header
-        self.row_separator, self.table['header'] = self.find_rows(self.clipping, y_space, avg_char_height)
+        self.row_separator, self.table['header'] = self.find_rows(self.clipping, y_space)
         self.remove_at_top(x_space=x_space)
         self.find_footnote(x_space=x_space)
         # adjust left and right border after removing rows at top
@@ -352,8 +337,7 @@ class LayoutExtractor:
             self.clipping.crop(self.table['bbox'])
         except:
             return [], []        
-        #self.table_lines = [x for x in self.table_lines if self.table['bbox'][1] < x['top'] < self.table['bbox'][3]]
-        self.row_separator, self.table['header'] = self.find_rows(self.clipping, y_space, avg_char_height)
+        self.row_separator, self.table['header'] = self.find_rows(self.clipping, y_space)
 
         # add the ruling lines to the list of rows
         self.row_separator.extend([{'x0': self.table['bbox'][0], 'x1': self.table['bbox'][2], 'width': self.table['bbox'][2] - self.table['bbox'][0], 'object_type': 'line', 'top': x['top'], 'bottom': x['bottom']} for x in self.table['lines']])
@@ -453,7 +437,6 @@ if __name__ == '__main__':
     footnote_complete, column_separator, row_separator = le.find_layout(5, 2, ['$', '%'])
         
     im = table_clip.to_image(resolution=300)
-    #im.draw_lines(tables[0]['lines'], stroke_width=3, stroke=(0,0,0))
 
     table_settings = le.get_table_settings()
 
