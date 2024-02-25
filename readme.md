@@ -128,7 +128,7 @@ Continuous text is detected by:
 
 Both the top and the bottom of the table are searched for continuous text and footnotes. There are, of course, no footnotes at the top, but an indexed heading will also be recognized as a footnote, and should be excluded from the table.
 
-| <img src="assets/remove_at_bottom.png" width="370" /> | <img src="assets/remove_footnote.png" width="430" /> |
+| <img src="assets/remove_at_bottom.png" width="470" /> | <img src="assets/remove_footnote.png" width="530" /> |
 |:--:|:--:|
 | *Continuous text is ignored* | *Footnotes are ignored* |
 
@@ -166,7 +166,7 @@ There is also a counterpart for symbols which normally come after a number, such
 Other special symbols, that are completely ignored for the column detection, are spaces, dots, line breaks and tabs. <br>
 The minus sign is special, because neighter before nor after it, a column is created. Numbers are sometimes given in ranges, so this prevents a column split in these cases.
 
-| <img src="assets/problem_layout_percent.png" width="470" /> | <img src="assets/special_minus.png" width="300" /> |
+| <img src="assets/problem_layout_percent.png" width="610" /> | <img src="assets/special_minus.png" width="390" /> |
 |:--:|:--:|
 | *Columns cannot be detected because a the percentage sign* | *Minus sign as special symbol* |
 
@@ -219,7 +219,9 @@ Other settings:
 + max_charspace (only rule-based): If the character space is greater than this value, a new column is created
 + workers: By default, the script runs in one process, but can be parallelized. This does only work for the rule-based approach and might not work correctly in the current python version.
 
-<img src="assets/cli.png" />
+| <img src="assets/cli.png" width=1000/> |
+|:--:|
+| *Command line interface* |
 
 # Testing and Evaluation
 The test_fintab.py script evaluates if the tables being detected in a PDF correspond to the tables in the fintabnet dataset. Both the custom table detection and Microsoft's table detection were tested. The dataset can be downloaded from <https://developer.ibm.com/exchanges/data/all/fintabnet/>. <br>
@@ -257,16 +259,16 @@ Time spent | 13:47 minutes * | - | 128:46 minutes ** | - | 159:19 minutes ** | -
 
 The dataset is not always correctly annotated, as the following images show. Blue is the table detection with the custom approach, and red is for the annotated tables/cells.
 
-| <img src="assets/fintab_false_annotated.png" width="250" /> | <img src="assets/fintab_false_annotated2.png" width="270" /> | <img src="assets/fintab_false_cells.png" width="400" /> |
+| <img src="assets/fintab_false_annotated.png" width="280" /> | <img src="assets/fintab_false_annotated2.png" width="320" /> | <img src="assets/fintab_false_cells.png" width="400" /> |
 |:--:|:--:|:--:|
 | *Table is incorrectly annotated* | *Table is incorrectly annotated* | *Cells have incorrect bounding boxes* |
 
 ## Table detection
-| <img src="assets/problem_table_separation.png" width="400" /> | <img src="assets/problem_table_not_separated.png" width="400" /> |
+| <img src="assets/problem_table_separation.png" width="490" /> | <img src="assets/problem_table_not_separated.png" width="510" /> |
 |:--:|:--:|
 | *Table should be separated* | *Table should be separated* |
 
-| <img src="assets/problem_table_bottom_threshold.png" width="370" /> | <img src="assets/problem_not_a_table.png" width="430" /> |
+| <img src="assets/problem_table_bottom_threshold.png" width="460" /> | <img src="assets/problem_not_a_table.png" width="540" /> |
 |:--:|:--:|
 | *Bottom threshold to low* | *Not a table* |
 
@@ -274,7 +276,7 @@ The last image is clearly not a table, but due to the lines that are used in thi
 The problem with the other tables is the top/bottom threshold. That can, of course, be solved individually, but would lead to problems with other tables. 
 
 ## Layout detection
-| <img src="assets/problem_header_detection.png" width="410" /> | <img src="assets/problem_footnote_separation.png" width="390" /> |
+| <img src="assets/problem_header_detection.png" width="520" /> | <img src="assets/problem_footnote_separation.png" width="480" /> |
 |:--:|:--:|
 | *The header is not correctly separated* | *The footnote is not correctly separated* |
 
