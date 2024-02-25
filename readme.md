@@ -8,6 +8,44 @@ Semester: 7
 
 Advisor: Nicolas Reuter
 
+# Table of Contents
+
+1. [Introduction](#introduction)
+2. [Tasks](#tasks)
+    1. [Table detection (table_finder.py)](#table-detection-table_finderpy)
+        1. [Rule-based Approach](#rule-based-approach)
+            1. [Concatenate Lines](#concatenate-lines)
+            2. [Special lines](#special-lines)
+            3. [Getting the bounding box](#getting-the-bounding-box)
+            4. [Page Layout](#page-layout)
+        2. [Model-based Approach](#model-based-approach)
+    2. [Layout detection (layout_extractor.py)](#layout-detection-layout_extractorpy)
+        1. [pdfplumber table extraction](#pdfplumber-table-extraction)
+        2. [Custom approach](#custom-approach)
+            1. [Average line spacing (deprecated)](#average-line-spacing-deprecated)
+            2. [Footnotes (and continuous text)](#footnotes-and-continuous-text)
+            3. [Header](#header)
+            4. [Column separation with header line](#column-separation-with-header-line)
+        3. [Font change](#font-change)
+        4. [Currency & Special Symbols](#currency--special-symbols)
+    3. [Table Extraction (table_extractor.py)](#table-extraction-table_extractorpy)
+        1. [Remove Cells](#remove-cells)
+        2. [Merge cells](#merge-cells)
+            1. [Cells in the body](#cells-in-the-body)
+            2. [Cells in the header](#cells-in-the-header)
+        3. [Shrink Cells](#shrink-cells)
+        4. [Table layout](#table-layout)
+        5. [Export](#export)
+3. [Cli](#cli)
+4. [Testing and Evaluation](#testing-and-evaluation)
+5. [Problems](#problems)
+    1. [Fintabnet](#fintabnet)
+    2. [Table detection](#table-detection)
+    3. [Layout detection](#layout-detection)
+6. [Conclusion & Outlook](#conclusion--outlook)
+    1. [Subheader](#subheader)
+
+
 # Introduction
 The goal of this internship is to detect tables within PDFs, based on their ruling lines. The table-formatting solely with ruling lines is relatively common in financial reports. The method is rule-based and gives therefore more control over the output. Rules can be easily implemented, and the results can be easily understood. Nevertheless, not every edge case can be covered.
 
@@ -189,13 +227,15 @@ Other settings:
 
 # Testing and Evaluation
 The test_fintab.py script evaluates if the tables being detected in a PDF correspond to the tables in the fintabnet dataset. Both the custom table detection and Microsoft's table detection were tested. The dataset can be downloaded from <https://developer.ibm.com/exchanges/data/all/fintabnet/>. <br>
-For every detected table, a similar table in fintabnet is looked for. Tables are similar if their intersection area divided by their union area is greater than 0.7. If that is the case, the table cells are compared. Whether two cells match, is decided with the SequenceMatcher class ([python difflib library](https://docs.python.org/3/library/difflib.html)). If the matching ratio is greater than 0.9, they are considered similar enough. With all cells compared, the precision, recall and f1 score are calculated for the table cells. If the f1 score is greater than 0.7, the cell structure is considered equal enough. The chosen values have turned out to be a good compromise. For comparison, the following images show what would be considered incorrect if we wanted a perfect table. Small and unimportant differences would lead to incorrect tables. The annotations are also often not entirely correct.
+For every detected table, a similar table in fintabnet is looked for. To check if tables are similar, the. This is done via intersecion over union (IOU). Tables are similar if their overlapping area is greater than 0.7. <br> 
+In that case, the table cells are compared. Whether two cells match, is decided with the SequenceMatcher class ([python difflib library](https://docs.python.org/3/library/difflib.html)). This class compares two strings for similarity. If the matching ratio is greater than 0.9, they are considered similar enough. This assures, that cells that have small differences like a missing dot, are also considered equal. An alternative would be to test the bounding boxes for overlap, but this does not account for cells where the bounding box is not correctly fitted to the text. <br>
+With all cells compared, the precision, recall and f1 score are calculated for the table cells. If the f1 score is greater than 0.7, the cell structure is considered equal enough. The chosen values have turned out to be a good compromise.
 
-| <img src="assets/cell_compare_no_threshold.png" width="600" /> | <img src="assets/cell_compare_no_threshold_test.png" width="600" /> |
-|:--:|:--:|
-| *Classified as false (with 100% cell coverage)* | *Annotated table in fintabnet* |
+## Comparison
 
-The following table compares the differences between the custom approach and the  results of Microsoft's table detection model. Both use the same batch of the first 10000 tables in fintabnet sorted alphabetically by their filenames.
+The following table compares the differences between the custom approach and the  results of Microsoft's table detection model. Both use the same batch of the first 10000 tables in fintabnet sorted alphabetically by their filenames. <br>
+The custom approach finds roughly the 10000, where with the model-based approach only 8400 tables are found, but the precision shows, that the model-based approach is much better in detecting the correct tables. Both methods lead to a relative similar F1 score. <br>
+The cell comparison shows a relative similar picture for the custom approach. The model-based layout detection is, compared to that way worse. Unfortunately the model is not trained on the fintabnet dataset but instead on the [pubtables dataset](https://www.microsoft.com/en-us/research/publication/pubtables-1m/). The results would be better.
 
 Metric | Custom table detection | % | Microsoft table detection with custom layout detection | % | Microsoft table detection + layout detection | % 
 ---|---|---|---|---|---|---
@@ -213,6 +253,8 @@ Time spent | 13:47 minutes * | - | 128:46 minutes ** | - | 159:19 minutes ** | -
 \* with parallelization: 10 workers with maximum of 50 tasks until new worker is spawned
 
 \** no cuda-capable gpu -> calculations on the cpu 
+
+
 
 # Problems
 ## Fintabnet
@@ -247,52 +289,14 @@ Similarly, in the second table, the footnote is not correctly separated, and the
 There will always be some edge case that goes unnoticed or is not important at the moment.
 Also when testing the approach with other datasets, which should also be done, new problems will eventually come up.
 
+Interesting for the comparison is also to test a model, that is trained on fintabnet and also to compare the rule-based approach against other rule-based approaches.
+
 The biggest problem with the layout detection turned out to be the separation between header and body. The decision on the basis of the first font change is not perfect, but neither is the decision only with the ruling lines. 
 
-Ideas:
-+ Use the topmost ruling line, that consists of the most segments. 
+Future layout detection could also include separating not only the header, but also sub headers.
+
+Ideas, that have not yet been implemented:
++ Use the topmost ruling line, that consists of the most segments for header detection 
 + Exclude text sequences in brackets for the column separation &rarr; (in million) or similar annotations.
-+ Improve the page layout detection 
-+ A better top/bottom threshold for table detection
-
-## Subheader
-
-
-Table of Contents
-
-1. [Internship: Table detection with ruling lines](#internship-table-detection-with-ruling-lines)
-2. [Introduction](#introduction)
-3. [Tasks](#tasks)
-    1. [Table detection (table_finder.py)](#table-detection-table_finderpy)
-        1. [Rule-based Approach](#rule-based-approach)
-            1. [Getting the table lines](#getting-the-table-lines)
-            2. [Concatenate Lines](#concatenate-lines)
-            3. [Special lines](#special-lines)
-            4. [Getting the bounding box](#getting-the-bounding-box)
-            5. [Page Layout](#page-layout)
-        2. [Model-based Approach](#model-based-approach)
-    2. [Layout detection (layout_extractor.py)](#layout-detection-layout_extractorpy)
-        1. [pdfplumber table extraction](#pdfplumber-table-extraction)
-        2. [Custom approach](#custom-approach)
-            1. [Average line spacing (deprecated)](#average-line-spacing-deprecated)
-            2. [Footnotes (and continuous text)](#footnotes-and-continuous-text)
-            3. [Header](#header)
-            4. [Column separation with header line](#column-separation-with-header-line)
-        3. [Font change](#font-change)
-    3. [Table Extraction (table_extractor.py)](#table-extraction-table_extractorpy)
-        1. [Remove Cells](#remove-cells)
-        2. [Merge cells](#merge-cells)
-            1. [Cells in the body](#cells-in-the-body)
-            2. [Cells in the header](#cells-in-the-header)
-            3. [Cells containing only a currency](#cells-containing-only-a-currency)
-        3. [Shrink Cells](#shrink-cells)
-        4. [Table layout](#table-layout)
-        5. [Export](#export)
-4. [Cli](#cli)
-5. [Testing and Evaluation](#testing-and-evaluation)
-6. [Problems](#problems)
-    1. [Fintabnet](#fintabnet)
-    2. [Table detection](#table-detection)
-    3. [Layout detection](#layout-detection)
-7. [Conclusion & Outlook](#conclusion--outlook)
-    1. [Subheader](#subheader)
++ Improve the page layout detection
++ A better top/bottom threshold for table detection, more adapted to the page content
