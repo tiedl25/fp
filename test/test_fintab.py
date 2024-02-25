@@ -97,7 +97,7 @@ def proc(dataset_path, pdf_path, test_tables, draw, tol, detection_method, layou
     cell_match_list = []
     total_found_tables = 0
 
-    tableExtractor = TableExtractor(path=f"{dataset_path}/pdf/{pdf_path}", separate_units=False, detection_method=detection_method, layout_method=layout_method, model=model, image_processor=image_processor, layout_model=structure_model, layout_processor=structure_image_processor, determine_row_space="min", max_column_space=4, max_row_space=-0.3)
+    tableExtractor = TableExtractor(path=f"{dataset_path}/pdf/{pdf_path}", separate_units=False, detection_method=detection_method, layout_method=layout_method, model=model, image_processor=image_processor, layout_model=structure_model, layout_processor=structure_image_processor, max_column_space=4, max_row_space=-0.3)
     try: tables = tableExtractor.extractTables(page_index=0) # all pdfs contain only one page
     except Exception as e: print(f"Error in {pdf_path}: {e}");return [0,0,0,0,0,0]
     page = tableExtractor.pages[0]
@@ -116,7 +116,6 @@ def proc(dataset_path, pdf_path, test_tables, draw, tol, detection_method, layou
         table['bbox'][3] = table['footer']
         any_overlap = 0
         for test_table in test_tables:
-            #if np.allclose(table['bbox'], test_table['bbox'], atol=tol):
             overlapping = calculate_iou(table['bbox'], test_table['bbox'])
             if overlapping > 0:
                 any_overlap = overlapping
@@ -147,7 +146,7 @@ def proc(dataset_path, pdf_path, test_tables, draw, tol, detection_method, layou
                 im.draw_rects([x['bbox'] for x in table['cells']], stroke_width=0, fill=(230, 65, 67, 65))
 
             for table in tables: 
-                im2.draw_rect(table['bbox'], stroke_width=0) # [table['bbox'][0], table['header'], table['bbox'][2], table['footer']], stroke_width=0)
+                im2.draw_rect(table['bbox'], stroke_width=0)
                 im2.draw_rects([x['bbox'] for x in table['cells']])
 
             im.save(f"img/{pdf_path.replace('/', '_')[0:-4]}_test.png")
@@ -159,7 +158,6 @@ def proc(dataset_path, pdf_path, test_tables, draw, tol, detection_method, layou
 
             for table in tables: 
                 im.draw_rect([table['bbox'][0], table['bbox'][1], table['bbox'][2], table['footer']], stroke_width=0)
-                #im.draw_hline(table['footer'])
 
             im.save(f"img/{pdf_path.replace('/', '_')[0:-4]}.png")
     except Exception as e:

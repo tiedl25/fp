@@ -39,7 +39,7 @@ class TableFinder:
                     return chars[i]['top']
                 i+=1
 
-        return chars[len(chars)-1]['top'] if len(chars) > 0 else bbox[3]
+        return chars[-1]['top'] if len(chars) > 0 else bbox[3]
 
     def find_table_bottom(self, bbox, max_diff, must_contain_chars=False):
         """
@@ -68,7 +68,7 @@ class TableFinder:
                 i+=1
 
 
-        return chars[len(chars)-1]['bottom'] if len(chars) > 0 else bbox[1]
+        return chars[-1]['bottom'] if len(chars) > 0 else bbox[1]
    
     def find_table_left(self, bbox, max_diff):
         """
@@ -99,7 +99,7 @@ class TableFinder:
                 i+=1
 
 
-        return chars[len(chars)-1]['x0']
+        return chars[-1]['x0']
     
     def find_table_right(self, bbox, max_diff):
         """
@@ -134,7 +134,7 @@ class TableFinder:
 
     def concat_lines(self, lst):
         """
-        Concatenate line elements with the same distance to the top of the page, that are not recognized as one
+        Concatenate lines with the same distance to the top of the page.
 
         Args:
             lst (list): A list of dictionaries representing lines.
@@ -186,17 +186,16 @@ class TableFinder:
         for line in lst:
             if current_line['top'] == line['top'] and line['x1'] > current_line['x1']:
                 current_line['x1'] = line['x1']
-                #current_line['width'] = current_line['width'] + line['width']
                 current_line['pts'][1] = line['pts'][1]
-                #if len(current_line['segments']) == 0: current_line['segments'] = [current_line]
                 current_line['segments'].append(line)
             else:
                 current_line['width'] = current_line['segments'][-1]['x1'] - current_line['segments'][0]['x0'] if len(current_line['segments']) > 0 else current_line['segments'][0]['width']
                 concat_lines.append(current_line)
                 current_line = line
                 current_line['segments'] = [current_line.copy()]
-
-        concat_lines.append(current_line) #append last line also to concat_lines
+                
+        #append last line also to concat_lines
+        concat_lines.append(current_line) 
 
         return concat_lines
     
@@ -222,6 +221,10 @@ class TableFinder:
         return lines
 
     def find_lines_of_dots(self):
+        """
+        Finds and groups the lines of dots in the given page based on their y-coordinates and proximity in x-coordinates.
+        Returns a list of dictionaries representing the lines of dots, each containing the x-coordinate range, top and bottom y-coordinates, width, height, and a flag indicating if it's a dot line.
+        """
         dots = [x for x in self.page.chars if x['text'] == '.']
 
         dots_grouped_by_y = [list(group) for key, group in itertools.groupby(sorted(dots, key=lambda e: e['top']), lambda e: e['top'])]
@@ -240,12 +243,11 @@ class TableFinder:
                         lines.append({'x0': x0, 'x1': x1, 'top': current_group[0]['bottom'], 'bottom': current_group[0]['bottom'], 'width': x1 - x0, 'height': 1, 'dot_line': True})
                     current_group = [dot]
 
-        #lines = [{'x0': min(x, key=lambda e: e['x0'])['x0'], 'x1': max(x, key=lambda e: e['x1'])['x1'], 'top': x[0]['bottom'], 'bottom': x[0]['bottom'], 'width': max(x, key=lambda e: e['x1'])['x1'] - min(x, key=lambda e: e['x0'])['x0'], 'height': 1} for x in dots_grouped_by_y if len(x) > 3]
         return lines
 
     def derive_tables(self, bottom_threshold=10, top_threshold=10, left_threshold=5, right_threshold=5):
         """
-        Look for overlapping tables and merge them together
+        Look for overlapping tables and merge them into a single table.
 
         Parameters:
             self (object): The object instance.
@@ -260,7 +262,6 @@ class TableFinder:
             bbox = test_table['bbox']
             table_bbox = table['bbox']
 
-            #table side | bbox side
             ll = bbox[0] + left_threshold < table_bbox[0] #bbox left side is on the left of the table
             lr = bbox[2] + left_threshold < table_bbox[0] #bbox right side is on the left of the table
             rr = bbox[2] - right_threshold > table_bbox[2] #bbox right side is on the right of the table
@@ -274,54 +275,49 @@ class TableFinder:
             r_inside = not (lr or rr)
             b_inside = not (tb or bb)
             t_inside = not (tt or bt)
-
-            #     2
-            # 1 _____ 3
-            #   |   |
-            # 8 |   | 4
-            #   |   |
-            # 7 ----- 5
-            #     6
-            # --> numbers refer to intersecting tables
             
             if ll and rr and tt and bb: # table is inside bbox
                 table_bbox = bbox
                 table['lines'].insert(0, test_table['lines'][0])
-            elif (ll and lr) or (rr and rl) or (tt and tb) or (bb and bt): # bbox is next to the table -> completely unrelated
+            elif (ll and lr) or (rr and rl) or (tt and tb) or (bb and bt): # bbox is next to the table
                 derived_tables.append(test_table)
-            elif l_inside and r_inside and t_inside and b_inside:
+            elif l_inside and r_inside and t_inside and b_inside: # bbox is inside of the table
                 table['lines'].append(test_table['lines'][0])
             else:
-                if l_inside and rr:
-                    if len(test_table['lines']) > 0: table['lines'].append(test_table['lines'][0])
-                    table_bbox[2] = bbox[2] # 3 4 5
-                    if b_inside and tt:
-                        table_bbox[1] = bbox[1] # 3
-                    elif t_inside and bb:
-                        table_bbox[3] = bbox[3] # 5
-                elif r_inside and ll:
-                    if len(test_table['lines']) > 0: table['lines'].append(test_table['lines'][0])
-                    table_bbox[0] = bbox[0] # 7 8 1
-                    if b_inside and tt:
-                        table_bbox[1] = bbox[1] # 7
-                    elif t_inside and bb:
-                        table_bbox[3] = bbox[3] # 1
-                elif b_inside and tt:
-                    if len(test_table['lines']) > 0: table['lines'].append(test_table['lines'][0])
-                    table_bbox[1] = bbox[1] # 1 2 3 --> in reality only 2
-                elif t_inside and bb:
-                    if len(test_table['lines']) > 0: table['lines'].append(test_table['lines'][0])
-                    table_bbox[3] = bbox[3] # 5 6 7 --> in reality only 6 
-                elif l_inside and r_inside:
-                    if len(test_table['lines']) > 0: table['lines'].append(test_table['lines'][0])
-
+                if l_inside and rr: # bbox right side is on the right of the table -> extend right
+                    if len(test_table['lines']) > 0: 
+                        table['lines'].append(test_table['lines'][0])
+                    table_bbox[2] = bbox[2] 
+                    if b_inside and tt: # bbox top side is on top of the table -> extend top
+                        table_bbox[1] = bbox[1] 
+                    elif t_inside and bb: # bbox bottom side is below the table -> extend bottom
+                        table_bbox[3] = bbox[3] 
+                elif r_inside and ll: # bbox left side is on the left of the table -> extend left
+                    if len(test_table['lines']) > 0: 
+                        table['lines'].append(test_table['lines'][0])
+                    table_bbox[0] = bbox[0] 
+                    if b_inside and tt: # bbox top side is on top of the table -> extend top
+                        table_bbox[1] = bbox[1] 
+                    elif t_inside and bb: # bbox bottom side is below the table -> extend bottom
+                        table_bbox[3] = bbox[3] 
+                elif b_inside and tt: # bbox top side is on top of the table -> extend top
+                    if len(test_table['lines']) > 0: 
+                        table['lines'].append(test_table['lines'][0])
+                    table_bbox[1] = bbox[1] 
+                elif t_inside and bb: # bbox bottom side is below the table -> extend bottom
+                    if len(test_table['lines']) > 0: 
+                        table['lines'].append(test_table['lines'][0])
+                    table_bbox[3] = bbox[3] 
+                elif l_inside and r_inside: # bbox is between left and right of the table
+                    if len(test_table['lines']) > 0: 
+                        table['lines'].append(test_table['lines'][0])
                     if tt:
                         table_bbox[1] = bbox[1]
                     if bb:
                         table_bbox[3] = bbox[3]
-                elif b_inside and t_inside:
-                    if len(test_table['lines']) > 0: table['lines'].append(test_table['lines'][0])
-
+                elif b_inside and t_inside: # bbox is between top and bottom of the table
+                    if len(test_table['lines']) > 0: 
+                        table['lines'].append(test_table['lines'][0])
                     if rr:
                         table_bbox[2] = bbox[2]
                     if ll: 
@@ -334,8 +330,6 @@ class TableFinder:
                 if rr and ll:
                     table_bbox[0] = bbox[0]
                     table_bbox[2] = bbox[2]
-
-        #table['bbox'] = self.extend_table(table['bbox'])
 
         self.tables = derived_tables
         return table
@@ -369,8 +363,10 @@ class TableFinder:
 
         return bbox
 
-    # TODO IMPROVE THIS
-    def determine_average_line_height(self):
+    def line_threshold(self):
+        """
+        Calculate the mode of the vertical distances between characters in the page. 
+        """
         chars = sorted(self.page.chars, key=lambda e: e['bottom'])
 
         diff = []
@@ -401,18 +397,6 @@ class TableFinder:
         sum_height = sum(x['height'] for x in mid_chars)
 
         return len(objs) > 1 or sum_height > self.page.height * 0.3
-
-    def find_mid(self):
-        b = self.page.bbox
-        chars = sorted(self.page.crop([b[0]+100, b[1]+50, b[2]-100, b[3]-50]).chars, key=lambda e: e['x0'])
-
-        for i in range(len(chars)-1):
-            char = chars[i+1]
-            diff = char['x0'] - chars[i]['x1']
-
-            if diff > 5:
-                return chars[i]['x1']+diff/2
-        return None
             
     def find_tables(self, bottom_threshold=5, top_threshold=4, left_threshold=2, right_threshold=2, detection_method='rule-based', image=None):
         """
@@ -435,19 +419,21 @@ class TableFinder:
 
         chars = sorted([x for x in self.page.chars if x['matrix'][1] == 0 and x['matrix'][2] == 0 and x['text'] != ' ' and x['x0'] >= self.page.bbox[0] and x['x1'] <= self.page.bbox[2]], key=lambda e: e['x0'])
 
-        #mid = self.find_mid()
-        #if mid is None: 
+        # look for characters in the middle of the page -> one column page layout
         mid = (chars[0]['x0'] + chars[-1]['x1'])/2
         mid_chars = self.page.crop([mid, self.page.bbox[1], mid+3, self.page.bbox[3]], strict=False).chars
         two_column = sum(x['height'] for x in mid_chars) < self.page.height * 0.05
         if two_column:
             self.lines = [x for x in self.lines if x['width'] < (chars[-1]['x1'] - chars[0]['x0']) * 0.5]
 
+        # extend lines with sequences of dots
         all_lines = self.find_lines_of_dots() + self.lines
         all_lines.sort(key = lambda e: e['top'])
 
         if detection_method == 'rule-based':
-            bottom_threshold = self.determine_average_line_height()
+            bottom_threshold = self.line_threshold()
+
+            # find a bbox for each line
             for i, line in enumerate(all_lines):
                 if line['x0'] >= line['x1']:
                     continue
@@ -501,18 +487,13 @@ class TableFinder:
 
             derived_tables = self.tables     
         
+        # merge the bounding boxes
         derived_tables = []
         if (len(self.tables)>0):
             while True:
                 new_table = self.derive_tables()
                 new_table['footer'] = new_table['bbox'][3]
                 new_table['header'] = new_table['bbox'][1]
-                #old_box = new_table['bbox'].copy()
-                #new_table['bbox'][3] = self.extend_table_bottom([new_table['bbox'][0], new_table['bbox'][3], new_table['bbox'][2], self.page.bbox[3]])
-                ##new_table['bbox'][1] = self.extend_table_bottom([new_table['bbox'][0], self.page.bbox[1], new_table['bbox'][2], new_table['bbox'][3]])
-                #if new_table['bbox'] != old_box:
-                #    self.tables.insert(0, new_table)
-                #else:
                 derived_tables.append(new_table)
                 if len(self.tables) == 0:
                     break
@@ -531,16 +512,3 @@ class TableFinder:
                                                     x['top']>=t['bbox'][1] and x['bottom']<=t['bbox'][3])]
 
         return derived_tables
-
-if __name__ == '__main__':
-    tables = []
-
-    with pdfplumber.open("fintabnet/pdf/AKAM/2006/page_64.pdf") as pdf:
-        page = pdf.pages[0]
-        t_finder = TableFinder(page)
-        tables = t_finder.find_tables()
-
-        im = page.to_image(resolution=300)
-        bboxes = [x['bbox'] for x in tables]
-        im.draw_rects(bboxes)
-        im.save("test.png")
