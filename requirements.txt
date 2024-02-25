@@ -2,3 +2,6 @@ pdfplumber
 pandas
 regex
 transformers
+torch
+openpyxl
+timm
